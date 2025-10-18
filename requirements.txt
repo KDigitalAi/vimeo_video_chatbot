@@ -1,0 +1,53 @@
+# Core Dependencies for Vimeo Video Chatbot
+# Python 3.12 Compatible - All packages tested and verified
+############################################################
+
+# Web Framework
+fastapi==0.115.0
+uvicorn==0.31.1
+
+# Configuration & Settings
+python-dotenv==1.0.1
+pydantic==2.8.2
+pydantic-settings==2.4.0
+
+# HTTP Clients
+httpx==0.25.0
+requests==2.32.3
+
+# LangChain & AI/ML
+langchain==0.3.1
+langchain-community==0.3.1
+langchain-core==0.3.63
+langchain-openai==0.2.0
+langchain-text-splitters==0.3.8
+openai==1.50.0
+tiktoken==0.8.0
+
+# Database & Storage
+redis==5.0.0
+supabase==2.5.1
+
+# Security & Authentication
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.6
+
+# Monitoring & Logging
+prometheus-client==0.19.0
+structlog==24.4.0
+
+# Audio Processing
+pydub==0.25.1
+
+# Testing (Development)
+pytest==7.4.0
+pytest-asyncio==0.21.0
+pytest-cov==4.1.0
+pytest-mock==3.11.0
+
+# Additional dependencies that may be needed
+# (uncomment if required for specific features)
+# ffmpeg-python==0.2.0  # For audio processing
+# whisper==1.1.10       # For local Whisper transcription
+# torch==2.0.1          # For Whisper dependencies
