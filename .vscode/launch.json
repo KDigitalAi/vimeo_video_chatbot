@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Start Vimeo Chatbot Server",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": []
+        }
+    ]
+}

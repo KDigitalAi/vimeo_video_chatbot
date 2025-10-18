@@ -1,0 +1,31 @@
+{
+    "liveServer.settings.port": 5500,
+    "liveServer.settings.root": "/",
+    "liveServer.settings.CustomBrowser": "chrome",
+    "liveServer.settings.donotShowInfoMsg": true,
+    "liveServer.settings.donotVerifyTags": true,
+    "liveServer.settings.host": "127.0.0.1",
+    "liveServer.settings.useLocalIp": false,
+    "liveServer.settings.file": "index.html",
+    "liveServer.settings.ignoreFiles": [
+        ".vscode/**",
+        "**/*.scss",
+        "**/*.sass",
+        "**/*.ts",
+        "**/*.py",
+        "**/*.log",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/node_modules/**",
+        "**/.git/**",
+        "backend/**",
+        "*.bat",
+        "*.ps1",
+        "*.md",
+        "*.toml",
+        "*.txt",
+        "*.sql",
+        "test_connection.py",
+        "simple_test_server.py"
+    ]
+}
