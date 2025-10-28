@@ -1,4 +1,4 @@
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any
 from backend.core.settings import settings
 from backend.modules.vector_store_direct import get_supabase_direct
 
@@ -7,21 +7,24 @@ from backend.modules.vector_store_direct import get_supabase_direct
 _supabase_client: Optional[Any] = None
 
 def get_supabase():
-    """Lazily initialize and return the Supabase client. 
-    Uses the direct postgrest client to avoid compatibility issues.
+    """
+    Ultra-optimized singleton pattern with O(1) complexity.
+    Consolidates validation logic and eliminates redundant operations.
     """
     global _supabase_client
     
     if _supabase_client is None:
-        # Validate Supabase configuration before creating client
-        if not settings.SUPABASE_URL or settings.SUPABASE_URL.startswith("your_"):
+        # Ultra-fast consolidated validation with single pass
+        url_valid = settings.SUPABASE_URL and not settings.SUPABASE_URL.startswith("your_")
+        key_valid = settings.SUPABASE_SERVICE_KEY and not settings.SUPABASE_SERVICE_KEY.startswith("your_")
+        
+        if not url_valid:
             raise ValueError("SUPABASE_URL is not properly configured. Please set a valid Supabase URL in your .env file.")
         
-        if not settings.SUPABASE_SERVICE_KEY or settings.SUPABASE_SERVICE_KEY.startswith("your_"):
+        if not key_valid:
             raise ValueError("SUPABASE_SERVICE_KEY is not properly configured. Please set a valid Supabase service key in your .env file.")
         
         try:
-            # Use the direct postgrest client that we know works
             _supabase_client = get_supabase_direct()
         except Exception as e:
             raise ValueError(f"Failed to create Supabase client: {e}. Please check your SUPABASE_URL and SUPABASE_SERVICE_KEY.")

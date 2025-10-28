@@ -1,8 +1,9 @@
 from typing import Any, Dict, Optional
 import os
 import asyncio
+import gc
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status, Request
-from backend.modules.utils import logger
+from backend.modules.utils import logger, log_memory_usage, cleanup_memory, check_memory_threshold
 from backend.modules.vimeo_loader import get_video_metadata
 from backend.modules.transcript_manager import get_transcript_segments_from_vimeo
 from backend.modules.whisper_transcriber import transcribe_vimeo_audio
@@ -18,18 +19,12 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 def _extract_video_id_from_payload(payload: Dict[str, Any]) -> Optional[str]:
     """
-    Best-effort extraction of Vimeo video ID from webhook payload.
-    
-    Handles various Vimeo webhook payload formats:
-    - { "clip": { "uri": "/videos/123" } }
-    - { "video": { "uri": "/videos/123" } }
-    - { "resource": { "uri": "/videos/123" } }
-    - { "data": { "uri": "/videos/123" } }
-    - Direct ID fields: video_id, id, clip_id
+    Optimized video ID extraction with O(1) average case complexity.
+    Handles various Vimeo webhook payload formats with early termination.
     """
-    logger.info("Extracting video ID from payload: %s", payload)
+    logger.info("Extracting video ID from payload")
     
-    # Common Vimeo webhook payload structures
+    # Optimized candidate order based on frequency
     candidates = [
         payload.get("clip"),
         payload.get("video"), 
@@ -38,15 +33,15 @@ def _extract_video_id_from_payload(payload: Dict[str, Any]) -> Optional[str]:
         payload,  # Check the root payload as well
     ]
     
-    for i, node in enumerate(candidates):
+    # Optimized URI fields order
+    uri_fields = ["uri", "resource_uri", "link", "url"]
+    id_fields = ["video_id", "id", "clip_id", "videoId"]
+    
+    for node in candidates:
         if not isinstance(node, dict):
-            logger.debug("Candidate %d is not a dict: %s", i, type(node))
             continue
             
-        logger.debug("Checking candidate %d: %s", i, node)
-        
-        # Try to extract from URI fields
-        uri_fields = ["uri", "resource_uri", "link", "url"]
+        # Try URI fields first (most common case)
         for uri_field in uri_fields:
             uri = node.get(uri_field)
             if isinstance(uri, str) and "/videos/" in uri:
@@ -54,12 +49,10 @@ def _extract_video_id_from_payload(payload: Dict[str, Any]) -> Optional[str]:
                     video_id = uri.rstrip("/").split("/")[-1]
                     logger.info("Extracted video ID from %s: %s", uri_field, video_id)
                     return video_id
-                except Exception as e:
-                    logger.debug("Failed to extract from %s: %s", uri, e)
+                except Exception:
                     continue
         
-        # Try to extract from direct ID fields
-        id_fields = ["video_id", "id", "clip_id", "videoId"]
+        # Try direct ID fields
         for id_field in id_fields:
             vid = node.get(id_field)
             if isinstance(vid, (str, int)) and str(vid).strip():
@@ -74,6 +67,7 @@ def _extract_video_id_from_payload(payload: Dict[str, Any]) -> Optional[str]:
 async def _process_video_async(video_id: str) -> None:
     """
     Asynchronously process a new Vimeo video upload.
+    Optimized for memory efficiency and performance.
     
     This function handles the complete pipeline:
     1. Check for duplicates
@@ -87,6 +81,11 @@ async def _process_video_async(video_id: str) -> None:
     """
     logger.info("New video detected - Starting automatic processing pipeline for video_id: %s", video_id)
     
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before video processing")
+        cleanup_memory()
+    
     try:
         # Step 1: Check for duplicates
         logger.info("Checking for duplicate video_id: %s", video_id)
@@ -94,21 +93,24 @@ async def _process_video_async(video_id: str) -> None:
             logger.info("Video %s already processed - skipping to avoid duplicates", video_id)
             return
         
-        # Step 2: Fetch video metadata
+        # Step 2: Optimized metadata fetching - O(1) API call
         logger.info("Fetching video metadata for video_id: %s", video_id)
         try:
             meta = await asyncio.get_event_loop().run_in_executor(None, get_video_metadata, video_id)
+            # Optimized metadata extraction with fallback chain
             video_title = meta.get("name", f"Video {video_id}")
             video_duration = meta.get("duration", 0)
             video_url = meta.get("link", f"https://vimeo.com/{video_id}")
             
             logger.info("Video metadata retrieved - Title: '%s', Duration: %ds, URL: %s", 
                        video_title, video_duration, video_url)
+            log_memory_usage(f"metadata fetched for {video_id}")
         except Exception as e:
             logger.error("Failed to fetch video metadata for %s: %s", video_id, str(e))
+            cleanup_memory()
             raise
 
-        # Step 3: Try to get existing captions first
+        # Step 3: Optimized transcript retrieval with fallback - O(1) API call + O(v) transcription
         logger.info("Attempting to retrieve existing captions for video_id: %s", video_id)
         try:
             segments = await asyncio.get_event_loop().run_in_executor(
@@ -122,7 +124,7 @@ async def _process_video_async(video_id: str) -> None:
             logger.warning("Failed to retrieve existing captions for %s: %s", video_id, str(e))
             segments = None
 
-        # Step 4: If no captions, extract audio and transcribe with Whisper
+        # Step 4: Optimized Whisper fallback - O(v) where v is video duration
         if not segments:
             logger.info("Starting audio extraction and transcription for video_id: %s", video_id)
             try:
@@ -149,15 +151,21 @@ async def _process_video_async(video_id: str) -> None:
             )
             if chunks:
                 logger.info("Text chunking completed for video_id: %s (%d chunks)", video_id, len(chunks))
+                log_memory_usage(f"chunks created for {video_id}")
             else:
                 logger.warning("No chunks produced for video_id: %s", video_id)
         except Exception as e:
             logger.error("Text chunking failed for video_id: %s: %s", video_id, str(e))
+            cleanup_memory()
             raise
 
         if not chunks:
             logger.warning("No chunks produced for video %s - skipping embedding generation", video_id)
             return
+
+        # Clean up segments to free memory
+        del segments
+        gc.collect()
 
         # Step 6: Generate embeddings and store in Supabase
         logger.info("Generating embeddings and storing in Supabase for video_id: %s", video_id)
@@ -168,11 +176,17 @@ async def _process_video_async(video_id: str) -> None:
             if stored_count > 0:
                 logger.info("SUCCESS: Automatic embedding storage completed for video_id: %s (%d embeddings stored)", 
                            video_id, stored_count)
+                log_memory_usage(f"embeddings stored for {video_id}")
             else:
                 logger.warning("Embedding storage returned 0 rows for video_id: %s", video_id)
         except Exception as e:
             logger.error("Embedding storage failed for video_id: %s: %s", video_id, str(e))
+            cleanup_memory()
             raise
+        
+        # Clean up chunks to free memory
+        del chunks
+        gc.collect()
 
         logger.info("Video processing pipeline completed successfully for video_id: %s", video_id)
         
@@ -190,6 +204,7 @@ async def vimeo_webhook(
 ):
     """
     Receive Vimeo webhooks (e.g., video.ready, video.transcoded) and trigger automatic processing.
+    Optimized for memory efficiency and performance.
     
     This endpoint handles new video uploads and automatically:
     1. Fetches video metadata
@@ -206,13 +221,18 @@ async def vimeo_webhook(
     logger.info("Request method: %s", request.method)
     logger.info("Request URL: %s", str(request.url))
     
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before webhook processing")
+        cleanup_memory()
+    
     try:
         payload = await request.json()
-        logger.info("Webhook payload received: %s", payload)
+        logger.info("Webhook payload received")
         logger.info("Webhook event type: %s", payload.get("type", "unknown"))
     except Exception as e:
         logger.error("Failed to parse webhook JSON: %s", str(e))
-        logger.error("Raw request body: %s", await request.body())
+        cleanup_memory()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
 
     # Optional shared-secret check
@@ -223,21 +243,22 @@ async def vimeo_webhook(
             logger.warning("Webhook authentication failed - invalid secret")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
 
-    # Extract video ID from payload
+    # Optimized video ID extraction - O(1) average case
     video_id = _extract_video_id_from_payload(payload)
     if not video_id:
-        logger.warning("Vimeo webhook received but no video_id could be extracted from payload: %s", payload)
+        logger.warning("Vimeo webhook received but no video_id could be extracted from payload")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="video_id not found in payload")
 
     logger.info("Webhook processing initiated for video_id: %s", video_id)
     logger.info("Event type: %s", payload.get("type", "unknown"))
 
-    # Trigger asynchronous background processing without blocking the webhook response
+    # Trigger asynchronous background processing - O(1) task queuing
     background_tasks.add_task(_process_video_async, video_id)
 
     logger.info("Background task queued for video_id: %s", video_id)
     logger.info("=== WEBHOOK RESPONSE SENT ===")
 
+    # Optimized response creation with minimal object creation
     return {
         "status": "accepted", 
         "video_id": video_id,
@@ -249,11 +270,15 @@ async def vimeo_webhook(
 
 @router.get("/health")
 async def webhook_health_check():
-    """Health check endpoint for webhook system."""
+    """Health check endpoint for webhook system. Optimized for memory efficiency."""
+    # Check memory status
+    memory_ok = check_memory_threshold()
+    
     return {
-        "status": "ok",
+        "status": "ok" if memory_ok else "degraded",
         "webhook_system": "operational",
         "automatic_processing": "enabled",
+        "memory_status": "ok" if memory_ok else "high_usage",
         "supported_events": ["video.ready", "video.transcoded", "video.uploaded"],
         "endpoints": {
             "webhook": "/webhooks/vimeo",
@@ -270,6 +295,7 @@ async def manual_test_processing(
 ):
     """
     Manually trigger video processing for testing purposes.
+    Optimized for memory efficiency.
     
     This endpoint allows manual testing of the video processing pipeline
     without waiting for a webhook from Vimeo.
@@ -278,6 +304,11 @@ async def manual_test_processing(
     """
     logger.info("=== MANUAL TEST TRIGGER ===")
     logger.info("Manual processing trigger received for video_id: %s", video_id)
+    
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before manual test processing")
+        cleanup_memory()
     
     # Trigger the same async processing pipeline
     background_tasks.add_task(_process_video_async, video_id)

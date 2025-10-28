@@ -710,8 +710,9 @@ class AparatIE(LazyLoadExtractor):
 
 class AppleConnectIE(LazyLoadExtractor):
     _module = 'yt_dlp.extractor.appleconnect'
-    IE_NAME = 'AppleConnect'
-    _VALID_URL = 'https?://itunes\\.apple\\.com/\\w{0,2}/?post/(?:id)?sa\\.(?P<id>[\\w-]+)'
+    IE_NAME = 'apple:music:connect'
+    _VALID_URL = 'https?://music\\.apple\\.com/[\\w-]+/post/(?P<id>\\d+)'
+    IE_DESC = 'Apple Music Connect'
     _RETURN_TYPE = 'video'
 
 
@@ -4930,35 +4931,35 @@ class IdagioPlaylistBaseIE(LazyLoadExtractor):
 class IdagioAlbumIE(IdagioPlaylistBaseIE):
     _module = 'yt_dlp.extractor.idagio'
     IE_NAME = 'IdagioAlbum'
-    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com/albums/(?P<id>[\\w-]+)'
+    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com(?:/[a-z]{2})?/albums/(?P<id>[\\w-]+)'
     _RETURN_TYPE = 'playlist'
 
 
 class IdagioPersonalPlaylistIE(IdagioPlaylistBaseIE):
     _module = 'yt_dlp.extractor.idagio'
     IE_NAME = 'IdagioPersonalPlaylist'
-    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com/playlists/personal/(?P<id>[\\da-f-]+)'
+    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com(?:/[a-z]{2})?/playlists/personal/(?P<id>[\\da-f-]+)'
     _RETURN_TYPE = 'playlist'
 
 
 class IdagioPlaylistIE(IdagioPlaylistBaseIE):
     _module = 'yt_dlp.extractor.idagio'
     IE_NAME = 'IdagioPlaylist'
-    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com/playlists/(?!personal/)(?P<id>[\\w-]+)'
+    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com(?:/[a-z]{2})?/playlists/(?!personal/)(?P<id>[\\w-]+)'
     _RETURN_TYPE = 'playlist'
 
 
 class IdagioRecordingIE(IdagioPlaylistBaseIE):
     _module = 'yt_dlp.extractor.idagio'
     IE_NAME = 'IdagioRecording'
-    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com/recordings/(?P<id>\\d+)(?![^#]*[&?]trackId=\\d+)'
+    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com(?:/[a-z]{2})?/recordings/(?P<id>\\d+)(?![^#]*[&?]trackId=\\d+)'
     _RETURN_TYPE = 'playlist'
 
 
 class IdagioTrackIE(LazyLoadExtractor):
     _module = 'yt_dlp.extractor.idagio'
     IE_NAME = 'IdagioTrack'
-    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com/recordings/\\d+\\?(?:[^#]+&)?trackId=(?P<id>\\d+)'
+    _VALID_URL = 'https?://(?:www\\.)?app\\.idagio\\.com(?:/[a-z]{2})?/recordings/\\d+\\?(?:[^#]+&)?trackId=(?P<id>\\d+)'
     _RETURN_TYPE = 'video'
 
 
@@ -12148,9 +12149,9 @@ class TVN24IE(LazyLoadExtractor):
 
 class TVNoeIE(LazyLoadExtractor):
     _module = 'yt_dlp.extractor.tvnoe'
-    IE_NAME = 'TVNoe'
-    _VALID_URL = 'https?://(?:www\\.)?tvnoe\\.cz/video/(?P<id>[0-9]+)'
-    _WORKING = False
+    IE_NAME = 'tvnoe'
+    _VALID_URL = 'https?://(?:www\\.)?tvnoe\\.cz/porad/(?P<id>[\\w-]+)'
+    IE_DESC = 'Televize Noe'
     _RETURN_TYPE = 'video'
 
 

@@ -1,41 +1,74 @@
 # backend/modules/retriever_chain.py
-from langchain_openai import ChatOpenAI
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from functools import lru_cache
 from backend.core.settings import settings
-from backend.modules.utils import logger
+from backend.modules.utils import logger, log_memory_usage, cleanup_memory, check_memory_threshold
 
+# Lazy imports to reduce memory footprint
+def _get_langchain_imports():
+    """Get all required LangChain imports in one function."""
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain.chains import ConversationalRetrievalChain
+        from langchain.memory import ConversationBufferMemory
+        return ChatOpenAI, ConversationalRetrievalChain, ConversationBufferMemory
+    except ImportError as e:
+        logger.error(f"Failed to import LangChain modules: {e}")
+        raise
+
+@lru_cache(maxsize=4)
 def get_conversational_chain(vector_store, temperature: float = 0.0, k: int = 3):
+    """
+    Create conversational chain with caching to reduce initialization overhead.
+    Optimized for memory efficiency.
+    """
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before creating conversational chain")
+        cleanup_memory()
+    
     logger.info("Creating LLM and conversational chain using model %s", settings.LLM_MODEL)
-    llm = ChatOpenAI(model=settings.LLM_MODEL, temperature=temperature)
-    memory = ConversationBufferMemory(
-        memory_key="chat_history", 
-        return_messages=True,
-        output_key="answer"  # Explicitly set output key for memory
-    )
-    retriever = vector_store.as_retriever(search_kwargs={"k": k})
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=retriever,
-        memory=memory,
-        return_source_documents=True,
-        output_key="answer"  # Explicitly set output key for chain
-    )
-    return chain
+    
+    try:
+        # Lazy load components
+        ChatOpenAI, ConversationalRetrievalChain, ConversationBufferMemory = _get_langchain_imports()
+        
+        # Create LLM with memory optimization
+        llm = ChatOpenAI(
+            model=settings.LLM_MODEL, 
+            temperature=temperature,
+            max_tokens=1000,  # Limit response length to save memory
+            request_timeout=30  # Add timeout to prevent hanging
+        )
+        
+        # Create memory with size limits
+        memory = ConversationBufferMemory(
+            memory_key="chat_history", 
+            return_messages=True,
+            output_key="answer",
+            max_token_limit=2000  # Limit memory size
+        )
+        
+        # Create retriever with optimized search
+        retriever = vector_store.as_retriever(
+            search_kwargs={"k": min(k, 5)}  # Limit to 5 results max
+        )
+        
+        # Create chain
+        chain = ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=retriever,
+            memory=memory,
+            return_source_documents=True,
+            output_key="answer",
+            max_tokens_limit=1000,  # Limit total tokens
+            verbose=False  # Reduce logging overhead
+        )
+        
+        log_memory_usage("conversational chain creation")
+        return chain
+        
+    except Exception as e:
+        logger.error(f"Failed to create conversational chain: {e}")
+        cleanup_memory()
+        raise
 
-# # Test block to verify the code runs (no real OpenAI calls)
-# if __name__ == "__main__":
-#     print(" Testing retriever_chain.py setup...")
-#     try:
-#         # Create a fake vector store with a dummy retriever method
-#         class DummyRetriever:
-#             def as_retriever(self, search_kwargs):
-#                 return self
-#         dummy_store = DummyRetriever()
-
-#         # Try to create a chain (this will fail only if imports/config are wrong)
-#         chain = get_conversational_chain(dummy_store)
-#         print(" retriever_chain module structure is working fine (no API calls).")
-#     except Exception as e:
-#         print(" Skipped API call or encountered issue (likely missing API key).")
-#         print("Error details:", e)

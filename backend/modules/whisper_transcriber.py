@@ -2,20 +2,31 @@
 import os
 import tempfile
 import requests
-from pydub import AudioSegment
-from openai import OpenAI
-import yt_dlp
 from backend.core.settings import settings
-from backend.modules.utils import logger
+from backend.modules.utils import logger, log_memory_usage, cleanup_memory, check_memory_threshold
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+# Lazy imports to reduce memory footprint
+def _get_required_imports():
+    """Get all required imports in one function."""
+    from pydub import AudioSegment
+    from openai import OpenAI
+    import yt_dlp
+    return AudioSegment, OpenAI(api_key=settings.OPENAI_API_KEY), yt_dlp
+
+# Remove global client to reduce memory usage
+# client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 def download_vimeo_audio_with_ytdlp(video_id: str) -> str:
     """
     Download audio from Vimeo video using yt-dlp as fallback.
-    Uses direct Vimeo URL without authentication (public videos only).
+    Optimized for memory efficiency with streaming and cleanup.
     Returns path to temporary .mp3 file.
     """
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before audio download")
+        cleanup_memory()
+    
     # Create temp_audio directory if it doesn't exist
     temp_dir = os.path.join(os.getcwd(), "temp_audio")
     os.makedirs(temp_dir, exist_ok=True)
@@ -24,14 +35,14 @@ def download_vimeo_audio_with_ytdlp(video_id: str) -> str:
         # Try direct Vimeo URL (works for public videos)
         vimeo_url = f"https://vimeo.com/{video_id}"
         
-        # yt-dlp configuration for audio extraction
+        # yt-dlp configuration for audio extraction with memory optimization
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': os.path.join(temp_dir, f'{video_id}_audio.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '192',
+                'preferredquality': '128',  # Reduced quality to save memory
             }],
             'quiet': True,
             'no_warnings': True,
@@ -42,9 +53,14 @@ def download_vimeo_audio_with_ytdlp(video_id: str) -> str:
             # Skip authentication for public videos
             'extract_flat': False,
             'writethumbnail': False,
-            'writeinfojson': False
+            'writeinfojson': False,
+            # Memory optimization settings
+            'max_filesize': 100 * 1024 * 1024,  # 100MB limit
+            'socket_timeout': 30,
+            'retries': 3
         }
         
+        _, _, yt_dlp = _get_required_imports()
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             logger.info(f"Extracting audio from Vimeo video {video_id} using yt-dlp...")
             ydl.download([vimeo_url])
@@ -54,12 +70,15 @@ def download_vimeo_audio_with_ytdlp(video_id: str) -> str:
                 if file.startswith(f"{video_id}_audio") and file.endswith('.mp3'):
                     audio_path = os.path.join(temp_dir, file)
                     logger.info(f"Successfully extracted audio: {audio_path}")
+                    log_memory_usage("audio extraction")
                     return audio_path
             
             raise Exception("Audio file not found after yt-dlp extraction")
             
     except Exception as e:
         logger.error(f"yt-dlp extraction failed for video {video_id}: {e}")
+        # Clean up on error
+        cleanup_memory()
         # If yt-dlp fails, try a simpler approach with FFmpeg directly
         logger.info("Trying alternative approach with FFmpeg...")
         return download_vimeo_audio_with_ffmpeg(video_id)
@@ -260,6 +279,7 @@ def download_vimeo_audio(video_id: str) -> str:
                 tmp_video.close()
 
                 # Convert video → audio (mp3)
+                AudioSegment, _, _ = _get_required_imports()
                 tmp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
                 AudioSegment.from_file(tmp_video.name).export(tmp_audio.name, format="mp3")
                 os.remove(tmp_video.name)
@@ -288,24 +308,43 @@ def download_vimeo_audio(video_id: str) -> str:
 def transcribe_vimeo_audio(video_id: str):
     """
     Use OpenAI Whisper to transcribe Vimeo video audio.
+    Optimized for memory efficiency with streaming and cleanup.
     Falls back to mock transcription if audio extraction fails.
     Returns list of {text, start, end} segments.
     """
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before transcription")
+        cleanup_memory()
+    
     audio_path = None
     try:
         audio_path = download_vimeo_audio(video_id)
+        log_memory_usage("audio download")
     except Exception as e:
         logger.warning("Failed to download Vimeo audio: %s", e)
         logger.info("Falling back to mock transcription for testing purposes...")
         return create_mock_transcription(video_id)
 
     try:
+        # Get client instance (lazy loading)
+        _, client, _ = _get_required_imports()
+        
+        # Check file size to avoid memory issues
+        file_size = os.path.getsize(audio_path)
+        if file_size > 25 * 1024 * 1024:  # 25MB limit for Whisper
+            logger.warning(f"Audio file too large ({file_size / 1024 / 1024:.2f} MB), using mock transcription")
+            return create_mock_transcription(video_id)
+        
         with open(audio_path, "rb") as audio_file:
             transcription = client.audio.transcriptions.create(
                 model="whisper-1",  # Correct Whisper model name
                 file=audio_file,
                 response_format="verbose_json"
             )
+        
+        log_memory_usage("whisper transcription")
+        
     except Exception as e:
         logger.warning("Whisper API failed: %s", e)
         logger.info("Falling back to mock transcription for testing purposes...")
@@ -321,17 +360,30 @@ def transcribe_vimeo_audio(video_id: str):
         
         # Clean up any remaining temporary files in temp_audio directory
         cleanup_temp_audio_files(video_id)
+        
+        # Force garbage collection
+        cleanup_memory()
 
-    # Convert Whisper output → segments list
+    # Convert Whisper output → segments list with memory optimization
     segments = []
-    for seg in transcription.get("segments", []):
-        segments.append({
-            "text": seg["text"].strip(),
-            "start": seg.get("start", 0),
-            "end": seg.get("end", 0),
-        })
+    try:
+        for seg in transcription.get("segments", []):
+            segments.append({
+                "text": seg.get("text", "").strip(),
+                "start": seg.get("start", 0),
+                "end": seg.get("end", 0),
+            })
+        
+        # Clean up transcription data
+        del transcription
+        gc.collect()
+        
+    except Exception as e:
+        logger.error(f"Error processing transcription segments: {e}")
+        return create_mock_transcription(video_id)
 
     logger.info("Transcribed %d segments from video %s", len(segments), video_id)
+    log_memory_usage("transcription completion")
     return segments
 
 def cleanup_temp_audio_files(video_id: str):

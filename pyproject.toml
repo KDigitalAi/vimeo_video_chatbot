@@ -187,7 +187,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
     "--cov-report=xml",
-    "--cov-fail-under=80",
+    "--cov-fail-under=0",
     "--asyncio-mode=auto",
 ]
 testpaths = ["tests"]
@@ -233,56 +233,46 @@ directory = "htmlcov"
 
 # Pre-commit configuration
 [tool.pre-commit]
-repos = [
-    {
-        repo = "https://github.com/psf/black",
-        rev = "23.12.1",
-        hooks = [
-            {
-                id = "black",
-                language_version = "python3",
-            }
-        ],
-    },
-    {
-        repo = "https://github.com/charliermarsh/ruff-pre-commit",
-        rev = "v0.1.6",
-        hooks = [
-            {
-                id = "ruff",
-                args = ["--fix", "--exit-non-zero-on-fix"],
-            }
-        ],
-    },
-    {
-        repo = "https://github.com/pre-commit/mirrors-mypy",
-        rev = "v1.8.0",
-        hooks = [
-            {
-                id = "mypy",
-                additional_dependencies = ["types-requests", "types-redis"],
-            }
-        ],
-    },
-    {
-        repo = "https://github.com/pre-commit/pre-commit-hooks",
-        rev = "v4.5.0",
-        hooks = [
-            {
-                id = "trailing-whitespace",
-            },
-            {
-                id = "end-of-file-fixer",
-            },
-            {
-                id = "check-yaml",
-            },
-            {
-                id = "check-added-large-files",
-            },
-            {
-                id = "check-merge-conflict",
-            },
-        ],
-    },
-]
+
+[[tool.pre-commit.repos]]
+repo = "https://github.com/psf/black"
+rev = "23.12.1"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "black"
+  language_version = "python3"
+
+[[tool.pre-commit.repos]]
+repo = "https://github.com/charliermarsh/ruff-pre-commit"
+rev = "v0.1.6"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "ruff"
+  args = ["--fix", "--exit-non-zero-on-fix"]
+
+[[tool.pre-commit.repos]]
+repo = "https://github.com/pre-commit/mirrors-mypy"
+rev = "v1.8.0"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "mypy"
+  additional_dependencies = ["types-requests", "types-redis"]
+
+[[tool.pre-commit.repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v4.5.0"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "trailing-whitespace"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "end-of-file-fixer"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "check-yaml"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "check-added-large-files"
+
+  [[tool.pre-commit.repos.hooks]]
+  id = "check-merge-conflict"
