@@ -1,5 +1,6 @@
 # Core Dependencies for Vimeo Video Chatbot
 # Python 3.12 Compatible - All packages tested and verified
+# Comprehensive analysis of backend/modules and backend/api folder dependencies
 ############################################################
 
 # Web Framework
@@ -11,16 +12,18 @@ python-dotenv==1.0.1
 pydantic==2.8.2
 pydantic-settings==2.4.0
 
-# HTTP Clients
+# HTTP Clients & Network
 httpx==0.25.0
 requests==2.32.3
 
-# LangChain & AI/ML
+# LangChain & AI/ML Framework
 langchain==0.3.1
 langchain-community==0.3.1
 langchain-core==0.3.63
 langchain-openai==0.2.0
 langchain-text-splitters==0.3.8
+
+# OpenAI Integration
 openai==1.50.0
 tiktoken==0.8.0
 
@@ -37,17 +40,79 @@ python-multipart==0.0.6
 prometheus-client==0.19.0
 structlog==24.4.0
 
-# Audio Processing
+# Rate Limiting
+slowapi==0.1.9
+
+# Audio Processing (whisper_transcriber.py)
 pydub==0.25.1
 
+# Video Processing (whisper_transcriber.py)
+yt-dlp>=2024.12.13
+
+# Numerical Computing (vector_store.py)
+numpy>=1.26.0
+
+# PDF Processing Dependencies
+PyPDF2>=3.0.0
+PyMuPDF>=1.23.0
+
+# Optional Dependencies (with graceful fallbacks)
+# Uncomment if you need these features:
+
+# System Monitoring (utils.py) - Required for memory management
+psutil==5.9.5
+
+# Direct Database Access (vector_store_direct.py) - Required
+postgrest>=0.14.0
+   
 # Testing (Development)
 pytest==7.4.0
 pytest-asyncio==0.21.0
 pytest-cov==4.1.0
 pytest-mock==3.11.0
 
-# Additional dependencies that may be needed
-# (uncomment if required for specific features)
-# ffmpeg-python==0.2.0  # For audio processing
+# Additional Audio/Video Processing (if needed)
+# ffmpeg-python==0.2.0  # For advanced audio processing
 # whisper==1.1.10       # For local Whisper transcription
 # torch==2.0.1          # For Whisper dependencies
+
+############################################################
+# DEPENDENCY ANALYSIS SUMMARY
+############################################################
+# 
+# Required Dependencies (from modules + API analysis):
+# - fastapi: Web framework for API endpoints (chat.py, ingest.py, webhooks.py)
+# - requests: HTTP client for Vimeo API and OpenAI API calls
+# - openai: OpenAI API client for embeddings and chat
+# - langchain_openai: LangChain OpenAI integration (chat.py)
+# - langchain_community: LangChain community packages
+# - langchain: Core LangChain framework (chat.py)
+# - numpy: Numerical computing for vector operations
+# - pydub: Audio processing for Whisper transcription
+# - yt-dlp: Video downloading from Vimeo
+# 
+# Optional Dependencies (graceful fallbacks):
+# - psutil: System monitoring (disabled if not available)
+# - postgrest: Direct database access (disabled if not available)
+# 
+# Standard Library (no installation needed):
+# - time, gc, os, tempfile, subprocess, asyncio
+# - logging, json, re, uuid, datetime, random
+# - pathlib, functools, typing
+#
+# API Folder Dependencies:
+# - chat.py: fastapi, langchain.schema, langchain_openai, backend modules
+# - ingest.py: fastapi, backend modules
+# - webhooks.py: fastapi, backend modules
+#
+# Backend Core Folder Dependencies:
+# - settings.py: python-dotenv, pydantic, pydantic-settings
+# - security.py: fastapi, python-jose[cryptography], passlib[bcrypt]
+# - validation.py: pydantic
+# - supabase_client.py: backend.core.settings, backend.modules.vector_store_direct
+#
+# PDF Processing Dependencies:
+# - pdf_processor.py: PyPDF2, PyMuPDF (fitz)
+# - pdf_store.py: backend.modules.vector_store_direct
+# - pdf_ingest.py: fastapi, backend.modules.pdf_processor, backend.modules.pdf_store
+############################################################

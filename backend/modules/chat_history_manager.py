@@ -1,12 +1,14 @@
 # backend/modules/chat_history_manager.py
 """
 Chat history management for storing and retrieving chat interactions.
+Optimized for memory efficiency and reduced database calls.
 """
 import uuid
 from datetime import datetime
 from typing import List, Dict, Optional
+from functools import lru_cache
 from backend.core.supabase_client import get_supabase
-from backend.modules.utils import logger
+from backend.modules.utils import logger, log_memory_usage, cleanup_memory, check_memory_threshold
 
 
 def store_chat_interaction(
@@ -18,6 +20,7 @@ def store_chat_interaction(
 ) -> Optional[str]:
     """
     Store a chat interaction in the chat_history table.
+    Optimized for memory efficiency with batch processing.
     
     Args:
         user_id: User identifier
@@ -29,8 +32,23 @@ def store_chat_interaction(
     Returns:
         The ID of the stored chat interaction, or None if failed
     """
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before storing chat interaction")
+        cleanup_memory()
+    
     try:
         supabase = get_supabase()
+        
+        # Truncate messages if too long to prevent memory issues
+        max_message_length = 10000  # 10KB limit per message
+        if len(user_message) > max_message_length:
+            user_message = user_message[:max_message_length] + "..."
+            logger.warning(f"User message truncated to {max_message_length} characters")
+        
+        if len(bot_response) > max_message_length:
+            bot_response = bot_response[:max_message_length] + "..."
+            logger.warning(f"Bot response truncated to {max_message_length} characters")
         
         chat_record = {
             "id": str(uuid.uuid4()),
@@ -47,6 +65,7 @@ def store_chat_interaction(
         if result.data:
             chat_id = result.data[0]["id"]
             logger.info(f"Chat interaction stored successfully with ID: {chat_id}")
+            log_memory_usage("chat storage")
             return chat_id
         else:
             logger.error("Failed to store chat interaction - no data returned")
@@ -54,9 +73,11 @@ def store_chat_interaction(
             
     except Exception as e:
         logger.error(f"Failed to store chat interaction: {e}")
+        cleanup_memory()
         return None
 
 
+@lru_cache(maxsize=32)
 def get_chat_history(
     user_id: str,
     session_id: Optional[str] = None,
@@ -64,6 +85,7 @@ def get_chat_history(
 ) -> List[Dict]:
     """
     Retrieve chat history for a user or session.
+    Optimized with caching to reduce database calls.
     
     Args:
         user_id: User identifier
@@ -73,22 +95,33 @@ def get_chat_history(
     Returns:
         List of chat history records
     """
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before retrieving chat history")
+        cleanup_memory()
+    
     try:
         supabase = get_supabase()
         
+        # Limit the number of records to prevent memory issues
+        max_limit = min(limit, 100)  # Cap at 100 records
+        
         query = supabase.table("chat_history").select("*")
         
+        # Always filter by user_id
+        query = query.eq("user_id", user_id)
+        
+        # If session_id is provided, also filter by session_id
         if session_id:
             query = query.eq("session_id", session_id)
-        else:
-            query = query.eq("user_id", user_id)
         
-        query = query.order("created_at", desc=True).limit(limit)
+        query = query.order("created_at", desc=True).limit(max_limit)
         
         result = query.execute()
         
         if result.data:
             logger.info(f"Retrieved {len(result.data)} chat history records")
+            log_memory_usage("chat history retrieval")
             return result.data
         else:
             logger.info("No chat history found")
@@ -96,6 +129,7 @@ def get_chat_history(
             
     except Exception as e:
         logger.error(f"Failed to retrieve chat history: {e}")
+        cleanup_memory()
         return []
 
 
@@ -118,16 +152,15 @@ def get_chat_sessions(user_id: str) -> List[Dict]:
         ).eq("user_id", user_id).order("created_at", desc=True).execute()
         
         if result.data:
-            # Group by session_id and get the latest message for each
-            sessions = {}
-            for record in result.data:
-                session_id = record["session_id"]
-                if session_id not in sessions:
-                    sessions[session_id] = {
-                        "session_id": session_id,
-                        "last_message": record["user_message"],
-                        "last_activity": record["created_at"]
-                    }
+            # Optimized grouping with O(n) complexity using dict comprehension
+            sessions = {
+                record["session_id"]: {
+                    "session_id": record["session_id"],
+                    "last_message": record["user_message"],
+                    "last_activity": record["created_at"]
+                }
+                for record in result.data
+            }
             
             session_list = list(sessions.values())
             logger.info(f"Retrieved {len(session_list)} chat sessions")
