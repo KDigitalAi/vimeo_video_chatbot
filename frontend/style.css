@@ -1,3 +1,966 @@
-/* Copied from project root so FastAPI can serve it from /frontend */
-@import url("../style.css");
+/* Educational Platform Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
+/* Academic typography for student-friendly experience */
+body {
+    font-family: 'Inter', 'Open Sans', 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background-color: #f8fafc;
+    color: #1e293b;
+    line-height: 1.6;
+    overflow-x: hidden;
+    /* Performance optimizations */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    /* Memory optimization */
+    contain: layout style;
+}
+
+/* High contrast mode support */
+body.high-contrast {
+    background-color: #000000;
+    color: #ffffff;
+}
+
+body.high-contrast .header {
+    background-color: #000000;
+    border-bottom-color: #ffffff;
+}
+
+
+body.high-contrast .message-text {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border: 1px solid #ffffff;
+}
+
+/* Educational App Container */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 100%;
+    margin: 0 auto;
+    /* Performance optimizations */
+    contain: layout style;
+    will-change: auto;
+}
+
+/* Educational Header */
+.header {
+    background: #ffffff;
+    border-bottom: 2px solid #e2e8f0;
+    padding: 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+    /* Performance optimizations */
+    will-change: transform;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 1.5rem;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+
+.logo i {
+    font-size: 1.5rem;
+    color: #2563eb;
+}
+
+.logo-text h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1e293b;
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+}
+
+.institution-name {
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 500;
+    display: block;
+    margin-top: -2px;
+}
+
+.header-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* Educational Layout Structure */
+.main-layout {
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Educational Buttons */
+.btn-primary, .btn-secondary, .btn-accessibility {
+    padding: 0.75rem 1.25rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: 'Inter', sans-serif;
+    /* Performance optimizations */
+    will-change: transform, background-color;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+.btn-primary {
+    background: #2563eb;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+    background: #cbd5e1;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-secondary {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
+.btn-secondary:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+.btn-accessibility {
+    background: #f8fafc;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
+    padding: 0.75rem;
+}
+
+.btn-accessibility:hover {
+    background: #e2e8f0;
+    color: #2563eb;
+}
+
+/* Educational Main Content */
+.main-content {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #f8fafc;
+    /* Performance optimizations */
+    contain: layout style;
+    will-change: auto;
+}
+
+/* Educational Chat Container */
+.chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+    max-width: 100%;
+    margin: 0 auto;
+    width: 100%;
+    /* Performance optimizations */
+    will-change: scroll-position;
+    transform: translateZ(0);
+    contain: layout style;
+    /* Memory optimization */
+    overscroll-behavior: contain;
+}
+
+.chat-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.chat-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chat-container::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 3px;
+}
+
+.chat-container::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
+/* Educational Messages */
+.message {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    animation: fadeInUp 0.3s ease;
+    /* Ultra-optimized hardware acceleration */
+    will-change: transform, opacity;
+    transform: translateZ(0);
+    contain: layout style;
+    /* Memory optimization */
+    backface-visibility: hidden;
+}
+
+/* Ultra-optimized animation with hardware acceleration */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translate3d(0, 10px, 0);
+    }
+    to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+    }
+}
+
+.user-message {
+    flex-direction: row-reverse;
+}
+
+.message-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.user-message .message-avatar {
+    background: #2563eb;
+    color: white;
+}
+
+.bot-message .message-avatar {
+    background: #f1f5f9;
+    color: #2563eb;
+    border: 2px solid #e2e8f0;
+}
+
+.message-content {
+    flex: 1;
+    max-width: calc(100% - 48px);
+}
+
+.user-message .message-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.message-text {
+    background: white;
+    padding: 1.5rem 2rem;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    font-size: 1rem;
+    line-height: 1.3;
+    /* Educational typography for better readability */
+    font-weight: 400;
+    letter-spacing: 0.01em;
+    font-family: 'Inter', 'Open Sans', sans-serif;
+    border: 1px solid #e2e8f0;
+}
+
+.user-message .message-text {
+    background: #2563eb;
+    color: white;
+    border-bottom-right-radius: 6px;
+    border: 1px solid #1d4ed8;
+}
+
+.bot-message .message-text {
+    border-bottom-left-radius: 6px;
+    background: #ffffff;
+    color: #1e293b;
+}
+
+.message-text p {
+    margin: 0 0 0.5rem 0;
+    line-height: 1.3;
+}
+
+.message-text p:last-child {
+    margin-bottom: 0;
+}
+
+/* Optimized welcome message styling for educational clarity */
+.bot-message .message-text h3 {
+    margin: 0 0 0.5rem 0;
+    line-height: 1.4;
+    font-size: 1.1rem;
+}
+
+.bot-message .message-text p {
+    margin: 0 0 0.4rem 0;
+    line-height: 1.4;
+    font-size: 0.95rem;
+}
+
+.bot-message .message-text ul {
+    margin: 0.4rem 0;
+    padding-left: 1.5rem;
+}
+
+.bot-message .message-text li {
+    margin: 0.2rem 0;
+    line-height: 1.4;
+    font-size: 0.9rem;
+}
+
+/* Enhanced typography for better readability */
+.message-text h1, .message-text h2, .message-text h3, .message-text h4, .message-text h5, .message-text h6 {
+    font-weight: 600;
+    margin: 0.75rem 0 0.5rem 0;
+    line-height: 1.2;
+    color: #1f2937;
+}
+
+.message-text h1 { font-size: 1.5rem; }
+.message-text h2 { font-size: 1.3rem; }
+.message-text h3 { font-size: 1.2rem; }
+.message-text h4 { font-size: 1.1rem; }
+.message-text h5 { font-size: 1rem; }
+.message-text h6 { font-size: 0.95rem; }
+
+.message-text h1:first-child, .message-text h2:first-child, .message-text h3:first-child, 
+.message-text h4:first-child, .message-text h5:first-child, .message-text h6:first-child {
+    margin-top: 0;
+}
+
+.message-text strong, .message-text b {
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.message-text em, .message-text i {
+    font-style: italic;
+    color: #4b5563;
+}
+
+.message-text code {
+    background: #f3f4f6;
+    color: #e11d48;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'Fira Code', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.message-text pre {
+    background: #1f2937;
+    color: #f9fafb;
+    padding: 0.75rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.5rem 0;
+    font-family: 'Fira Code', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1.3;
+    border: 1px solid #374151;
+}
+
+.message-text pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+}
+
+.message-text ul, .message-text ol {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+}
+
+.message-text li {
+    margin: 0.25rem 0;
+    line-height: 1.3;
+}
+
+.message-text blockquote {
+    border-left: 4px solid #10a37f;
+    padding-left: 1rem;
+    margin: 0.5rem 0;
+    color: #4b5563;
+    font-style: italic;
+    background: #f9fafb;
+    padding: 0.75rem;
+    border-radius: 0 8px 8px 0;
+}
+
+.message-text table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+}
+
+.message-text th, .message-text td {
+    border: 1px solid #e5e7eb;
+    padding: 0.75rem;
+    text-align: left;
+}
+
+.message-text th {
+    background: #f9fafb;
+    font-weight: 600;
+    color: #374151;
+}
+
+.message-text hr {
+    border: none;
+    height: 1px;
+    background: #e5e7eb;
+    margin: 0.75rem 0;
+}
+
+.message-time {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 0.5rem;
+}
+
+.user-message .message-time {
+    text-align: right;
+}
+
+/* Single-line Sources Display */
+.sources-line {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #e5e7eb;
+    font-size: 0.75rem;
+    color: #6b7280;
+    line-height: 1.4;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    align-items: center !important;
+    flex-direction: row !important;
+}
+
+.sources-line::before {
+    content: "Sources: ";
+    color: #9ca3af;
+    font-weight: 500;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+.source-item-inline {
+    display: inline-flex !important;
+    align-items: center !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    margin-right: 4px !important;
+}
+
+.source-item-inline:not(:last-child)::after {
+    content: " • ";
+    color: #9ca3af;
+    margin: 0 2px;
+}
+
+.source-title-inline {
+    font-weight: 400;
+    color: #6b7280;
+    display: inline !important;
+}
+
+.source-relevance {
+    color: #9ca3af;
+    font-weight: 400;
+    margin-left: 2px !important;
+    display: inline !important;
+}
+
+.sources-more {
+    color: #9ca3af;
+    font-style: italic;
+    flex-shrink: 0 !important;
+    display: inline !important;
+    margin-left: 4px !important;
+}
+
+/* Educational Input Container */
+.input-container {
+    background: white;
+    border-top: 2px solid #e2e8f0;
+    padding: 1rem;
+    position: sticky;
+    bottom: 0;
+    /* Performance optimizations */
+    will-change: transform;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+/* Educational Input Wrapper */
+.input-wrapper {
+    max-width: 100%;
+    margin: 0 auto;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+    background: #f8fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.75rem;
+    transition: all 0.2s ease;
+    /* Performance optimizations */
+    will-change: border-color, box-shadow;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+.input-wrapper:focus-within {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+#messageInput {
+    flex: 1;
+    border: none;
+    background: transparent;
+    resize: none;
+    outline: none;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    min-height: 20px;
+    max-height: 100px;
+    font-family: inherit;
+    color: #343541;
+}
+
+#messageInput::placeholder {
+    color: #9ca3af;
+}
+
+/* Educational Send Button */
+.send-button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    font-size: 1rem;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+    /* Performance optimizations */
+    will-change: transform, background-color;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+.send-button:hover:not(:disabled) {
+    background: #1d4ed8;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.send-button:disabled {
+    background: #cbd5e1;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.input-footer {
+    max-width: 100%;
+    margin: 1rem auto 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+    color: #64748b;
+    font-family: 'Inter', sans-serif;
+}
+
+.char-count {
+    font-weight: 600;
+    color: #475569;
+}
+
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.loading-overlay.show {
+    display: flex;
+}
+
+.loading-spinner {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+/* Ultra-optimized Spinner with hardware acceleration */
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid #10a37f;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1rem;
+    /* Performance optimizations */
+    will-change: transform;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+/* Ultra-optimized spin animation with hardware acceleration */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+    color: #6b7280;
+    font-weight: 500;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-overlay.show {
+    display: flex;
+}
+
+.modal {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.modal-close:hover {
+    background: #f3f4f6;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-body p {
+    color: #374151;
+    line-height: 1.6;
+}
+
+.modal-footer {
+    padding: 1.5rem;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+/* Educational Mobile Responsiveness */
+@media (max-width: 1024px) {
+    .main-content {
+        margin-left: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    .header-content {
+        padding: 0.5rem 1rem;
+    }
+    
+    
+    .logo-text h1 {
+        font-size: 1.1rem;
+    }
+    
+    .institution-name {
+        font-size: 0.65rem;
+    }
+    
+    .chat-container {
+        padding: 1.5rem 1rem;
+    }
+    
+    .input-container {
+        padding: 0.75rem 1rem;
+    }
+    
+    .message {
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .message-avatar {
+        width: 36px;
+        height: 36px;
+        font-size: 0.9rem;
+    }
+    
+    .message-text {
+        padding: 1.25rem 1.5rem;
+        font-size: 0.95rem;
+        line-height: 1.3;
+    }
+    
+    .message-text h1 { font-size: 1.4rem; }
+    .message-text h2 { font-size: 1.3rem; }
+    .message-text h3 { font-size: 1.2rem; }
+    .message-text h4 { font-size: 1.1rem; }
+    .message-text h5 { font-size: 1rem; }
+    .message-text h6 { font-size: 0.95rem; }
+    
+    .sources-line {
+        font-size: 0.75rem;
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        gap: 3px;
+    }
+    
+    .input-footer {
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-start;
+    }
+    
+}
+
+@media (max-width: 480px) {
+    .header-actions {
+        display: none;
+    }
+    
+    
+    .logo h1 {
+        font-size: 1rem;
+    }
+    
+    .chat-container {
+        padding: 0.75rem;
+    }
+    
+    .input-container {
+        padding: 0.5rem;
+    }
+    
+    .message {
+        margin-bottom: 1rem;
+        gap: 0.5rem;
+    }
+    
+    .message-text {
+        padding: 0.875rem 1rem;
+        font-size: 0.85rem;
+        line-height: 1.2;
+    }
+    
+    .message-text h1 { font-size: 1.2rem; }
+    .message-text h2 { font-size: 1.1rem; }
+    .message-text h3 { font-size: 1rem; }
+    .message-text h4 { font-size: 0.95rem; }
+    .message-text h5 { font-size: 0.9rem; }
+    .message-text h6 { font-size: 0.85rem; }
+    
+    .sources-line {
+        font-size: 0.65rem;
+        margin-top: 0.375rem;
+        padding-top: 0.375rem;
+        gap: 2px;
+    }
+}
+
+/* Typing Indicator */
+.typing-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #9ca3af;
+    font-style: italic;
+    font-size: 0.875rem;
+}
+
+.typing-dots {
+    display: flex;
+    gap: 2px;
+}
+
+/* Ultra-optimized Typing Dot with hardware acceleration */
+.typing-dot {
+    width: 4px;
+    height: 4px;
+    background: #9ca3af;
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out;
+    /* Performance optimizations */
+    will-change: transform, opacity;
+    transform: translateZ(0);
+    contain: layout style;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+/* Ultra-optimized typing animation with hardware acceleration */
+@keyframes typing {
+    0%, 80%, 100% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* Educational section styling for better structure */
+.edu-section {
+    color: #2563eb;
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 1rem 0 0.5rem 0;
+    padding: 0.5rem 0;
+    border-bottom: 2px solid #e2e8f0;
+    font-family: 'Inter', sans-serif;
+}
+
+.edu-section:first-child {
+    margin-top: 0;
+}
+
+/* Responsive welcome message typography */
+@media (max-width: 768px) {
+    .bot-message .message-text h3 {
+        font-size: 1rem;
+        line-height: 1.3;
+    }
+    
+    .bot-message .message-text p {
+        font-size: 0.9rem;
+        line-height: 1.3;
+    }
+    
+    .bot-message .message-text li {
+        font-size: 0.85rem;
+        line-height: 1.3;
+    }
+    
+    .edu-section {
+        font-size: 0.95rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .bot-message .message-text h3 {
+        font-size: 0.95rem;
+        line-height: 1.2;
+    }
+    
+    .bot-message .message-text p {
+        font-size: 0.85rem;
+        line-height: 1.2;
+    }
+    
+    .bot-message .message-text li {
+        font-size: 0.8rem;
+        line-height: 1.2;
+    }
+    
+    .edu-section {
+        font-size: 0.9rem;
+    }
+}

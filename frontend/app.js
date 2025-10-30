@@ -292,23 +292,17 @@ class VimeoChatbot {
             console.log('📊 Response status:', response.status, response.statusText);
 
             if (!response.ok) {
-                let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                let errorData = {};
                 try {
-                    const cloned = response.clone();
-                    const errorData = await cloned.json();
-                    if (errorData && (errorData.detail || errorData.message)) {
-                        errorMessage = errorData.detail || errorData.message;
-                    }
+                    errorData = await response.json();
                     console.error('❌ Backend error response:', errorData);
-                } catch (_) {
-                    try {
-                        const textResponse = await response.text();
-                        console.error('❌ Raw error response:', textResponse);
-                        if (textResponse) errorMessage = textResponse;
-                    } catch (__) {
-                        // ignore secondary failures
-                    }
+                } catch (parseError) {
+                    console.error('❌ Failed to parse error response:', parseError);
+                    const textResponse = await response.text();
+                    console.error('❌ Raw error response:', textResponse);
                 }
+                
+                const errorMessage = errorData.detail || errorData.message || `HTTP ${response.status}: ${response.statusText}`;
                 throw new Error(errorMessage);
             }
 
@@ -610,5 +604,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-
