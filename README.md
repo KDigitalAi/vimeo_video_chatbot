@@ -2,6 +2,70 @@
 
 A modern, RAG-powered chatbot for querying Vimeo training videos using OpenAI embeddings and LangChain. Built with FastAPI backend and vanilla JavaScript frontend.
 
+## Recent Deployment Fix Log (last 10 commits)
+
+This section documents the recent sequence of fixes to get the app reliably deploying and running on Vercel (Python Serverless) with the SPA served by FastAPI.
+
+1) e5dfae3b – connected frontend (2025-10-30)
+- Purpose: Final wire-up after structuring the frontend folder. Verified SPA loads on Vercel domain.
+- Outcome: Frontend working end-to-end with backend.
+
+2) 27c6d01b – Frontend Added (2025-10-30)
+- Purpose: Ensured required assets exist under `frontend/` so FastAPI can serve them in serverless context.
+- Outcome: Static files present; mitigates “Frontend not found” fallback JSON response.
+
+3) e75ad4bf – Restore frontend under `/frontend` (2025-10-30)
+- Issue: FastAPI’s `root()` and static file handler look under `frontend/`; repo only had root-level `index.html`, `app.js`, `style.css`.
+- Change: Recreated `frontend/index.html`, `frontend/app.js`, `frontend/style.css` (importing root CSS) and used a relative API base URL for production.
+- Outcome: Backend could find and serve the SPA again.
+
+4) 590fa1e2 – Bundle frontend assets with function (2025-10-30)
+- Issue: Vercel did not include `frontend/**` in the serverless bundle, so static files were missing at runtime.
+- Change: `vercel.json` build config → `includeFiles: ["frontend/**"]` for `@vercel/python` build.
+- Outcome: `frontend/**` uploaded with the Python function; SPA available in production.
+
+5) a9dab234 – Serverless-safe metadata storage (2025-10-30)
+- Error: `OSError: [Errno 30] Read-only file system: 'backend/data'` during import of `metadata_manager.py`.
+- Change: Write metadata to `/tmp/backend_metadata` (or `$METADATA_DIR`), wrap `mkdir` and writes with try/except; skip write rather than crash if not writable.
+- Outcome: Import succeeds on Vercel’s read-only FS; ingest routes can load.
+
+6) 5910d363 – Serverless-safe logging (2025-10-30)
+- Error: `Read-only file system: 'backend/logs'` from `utils.get_logger()` trying to create files.
+- Change: Prefer stdout logging; if available, write to `/tmp/backend_logs`; never create `backend/logs` on serverless.
+- Outcome: App starts with logging to stdout; no FS errors.
+
+7) a4bd5b36 – ci: remove `pyproject.toml` (2025-10-30)
+- Reason: Allow Vercel’s Python builder to resolve from `requirements.txt` only, trimming serverless footprint and avoiding conflicting Python spec.
+- Outcome: Cleaner dependency resolution for serverless build.
+
+8) baeb7610 – Add `.vercelignore` (2025-10-30)
+- Error: “Serverless Function exceeded unzipped maximum size of 250 MB”.
+- Change: Ignore heavy directories and binaries: `venv/`, `.venv/`, `env/`, `uploads/`, `data/`, `models/`, `node_modules/`, `build/`, `dist/`, `tests/`, `docs/`, `.git/`, `.github/`, and large media/model files (`*.pdf`, `*.mp4`, `*.pt`, `*.bin`, `*.ckpt`, `*.onnx`, `*.h5`), plus caches.
+- Outcome: Serverless bundle size reduced below 250MB.
+
+9) 8a0294d7 – Modernize runtime & deps; simplify Vercel config (2025-10-30)
+- Error: `spawn pip3.9 ENOENT` due to older runtime assumptions and strict pins.
+- Changes:
+  - `runtime.txt` → `3.12`.
+  - `requirements.txt` → modern pins (`fastapi>=0.95.0`, `uvicorn>=0.20.0`, `werkzeug>=2.2.0`).
+  - `vercel.json` → builds-only, pointing to `backend/main.py`.
+  - `pyproject.toml` previously set to `>=3.11` (later removed in a4bd5b36 for lean builds).
+- Outcome: Build uses modern Python and succeeds without pip3.9.
+
+10) be85adee – vercel config file modified (2025-10-30)
+- Initial iteration on Vercel configuration prior to the finalized builds-only approach.
+
+### Key runtime behaviors after fixes
+- FastAPI serves SPA from `frontend/` and APIs under `/` (e.g., `/chat/query`, `/health`).
+- Logging writes to stdout (and `/tmp` when available) on Vercel.
+- Any file writes default to `/tmp` to avoid read-only FS errors.
+- `.vercelignore` keeps the serverless bundle well under the 250MB unzipped limit.
+
+### How to verify (post-deploy)
+- Open root URL → SPA loads (200), assets `/style.css?v=3`, `/app.js?v=3` 200.
+- `GET /health` → 200 JSON.
+- `POST /chat/query` → JSON response; if failing, clear cache and confirm same-origin API base in `frontend/index.html` meta tag is empty in production.
+
 ## Quick Start
 
 ```bash
