@@ -1,15 +1,8 @@
 {
-  "functions": {
-    "api/**/*.py": {
-      "runtime": "@vercel/python@4.0.0",
-      "pythonVersion": "3.11"
-    }
-  },
   "builds": [
-    { "src": "api/index.py", "use": "@vercel/python@4.0.0" }
+    { "src": "backend/main.py", "use": "@vercel/python" }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "api/index.py" }
-  ],
-  "buildCommand": "echo 'No build needed'"
+    { "src": "/(.*)", "dest": "backend/main.py" }
+  ]
 }
