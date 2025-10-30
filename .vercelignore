@@ -1,6 +1,5 @@
 serve_frontend.py
 auto_update_embeddings.py
-backend/
 uploads/
 venv/
 *.pyc
