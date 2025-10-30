@@ -1,9 +1,46 @@
-serve_frontend.py
-auto_update_embeddings.py
-uploads/
+# Exclude large/local-only artifacts to keep Serverless Function < 250MB
+# Keep backend/ and required source files INCLUDED
+
+# Python virtual envs
 venv/
-*.pyc
+.venv/
+env/
+
+# Data and uploaded assets
+uploads/
+data/
+models/
+
+# Node/build outputs
+node_modules/
+build/
+dist/
+
+# Docs/tests/CI metadata
+tests/
+docs/
+.git/
+.github/
+
+# Binaries and large model/media files
+*.pdf
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.pt
+*.bin
+*.ckpt
+*.onnx
+*.h5
+
+# Python caches
 __pycache__/
+*.pyc
 .pytest_cache/
 .coverage
 coverage.xml
+
+# Local helper scripts not needed in serverless bundle
+serve_frontend.py
+auto_update_embeddings.py
