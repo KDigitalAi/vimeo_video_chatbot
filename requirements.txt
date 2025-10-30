@@ -6,6 +6,12 @@
 # Web Framework
 fastapi==0.115.0
 uvicorn==0.31.1
+Flask==2.2.5
+Werkzeug==2.2.3
+requests
+gunicorn
+requests
+
 
 # Configuration & Settings
 python-dotenv==1.0.1

@@ -1,0 +1,10 @@
+serve_frontend.py
+auto_update_embeddings.py
+backend/
+uploads/
+venv/
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+coverage.xml
