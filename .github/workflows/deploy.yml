@@ -1,9 +1,9 @@
-name: Deploy to Vercel (qa)
+name: Deploy to Vercel (Production)
 
 on:
   push:
     branches:
-      - qa 
+      - main 
   workflow_dispatch:
 
 jobs:
@@ -12,4 +12,4 @@ jobs:
 
     steps:
       - name: Trigger Vercel Deployment
-        run: curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_JR3ZS05uE1rQTvk8HA63dRV3UcWv/TYz2A3MDA9"
+        run: curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_JR3ZS05uE1rQTvk8HA63dRV3UcWv/a6UgtMpojw"
