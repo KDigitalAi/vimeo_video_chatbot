@@ -80,6 +80,7 @@ body.high-contrast .message-text {
     gap: 0.5rem;
 }
 
+
 .logo i {
     font-size: 1.5rem;
     color: #2563eb;
@@ -763,6 +764,7 @@ body.high-contrast .message-text {
         padding: 0.5rem 1rem;
     }
     
+    
     .logo-text h1 {
         font-size: 1.1rem;
     }
@@ -822,6 +824,7 @@ body.high-contrast .message-text {
     .header-actions {
         display: none;
     }
+    
     
     .logo h1 {
         font-size: 1rem;

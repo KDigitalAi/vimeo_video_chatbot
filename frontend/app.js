@@ -276,9 +276,6 @@ class VimeoChatbot {
 
         try {
             console.log('📡 Making request to:', `${this.apiBaseUrl}/chat/query`);
-            console.log('📦 Request body:', JSON.stringify(requestBody, null, 2));
-            console.log('📦 Request body type:', typeof requestBody);
-            console.log('📦 Request body has request field:', 'request' in requestBody);
             
             const response = await fetch(`${this.apiBaseUrl}/chat/query`, {
                 method: 'POST',
@@ -293,20 +290,25 @@ class VimeoChatbot {
             this._timeoutId = null;
 
             console.log('📊 Response status:', response.status, response.statusText);
-            console.log('📊 Response headers:', Object.fromEntries(response.headers.entries()));
 
             if (!response.ok) {
-                let errorData = {};
+                let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
                 try {
-                    errorData = await response.json();
+                    const cloned = response.clone();
+                    const errorData = await cloned.json();
+                    if (errorData && (errorData.detail || errorData.message)) {
+                        errorMessage = errorData.detail || errorData.message;
+                    }
                     console.error('❌ Backend error response:', errorData);
-                } catch (parseError) {
-                    console.error('❌ Failed to parse error response:', parseError);
-                    const textResponse = await response.text();
-                    console.error('❌ Raw error response:', textResponse);
+                } catch (_) {
+                    try {
+                        const textResponse = await response.text();
+                        console.error('❌ Raw error response:', textResponse);
+                        if (textResponse) errorMessage = textResponse;
+                    } catch (__) {
+                        // ignore secondary failures
+                    }
                 }
-                
-                const errorMessage = errorData.detail || errorData.message || `HTTP ${response.status}: ${response.statusText}`;
                 throw new Error(errorMessage);
             }
 
@@ -445,7 +447,7 @@ class VimeoChatbot {
         const remainingCount = sources.length - maxSources;
         
         // Create separate source item elements for flexbox
-        displaySources.forEach((source, index) => {
+        displaySources.forEach((source) => {
             const title = source.video_title || 'Unknown Video';
             const relevance = source.relevance_score ? 
                 `(${(source.relevance_score * 100).toFixed(1)}%)` : '';
@@ -469,12 +471,6 @@ class VimeoChatbot {
         }
         
         return sourcesLine;
-    }
-
-    formatTimestamp(seconds) {
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = Math.floor(seconds % 60);
-        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
 
     escapeHtml(text) {

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Learning Assistant - Educational Institute</title>
     <!-- Preload critical resources for faster loading -->
-    <link rel="preload" href="style.css" as="style">
-    <link rel="preload" href="app.js" as="script">
+    <link rel="preload" href="style.css?v=3" as="style">
+    <link rel="preload" href="app.js?v=3" as="script">
     <link rel="stylesheet" href="style.css?v=3">
     <!-- Google Fonts for educational typography -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lato:wght@300;400;700&family=Open+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -16,8 +16,8 @@
     <meta name="description" content="AI-powered learning assistant for educational content analysis and student support">
     <meta name="theme-color" content="#2563eb">
     <meta name="color-scheme" content="light">
-    <!-- API Configuration -->
-    <meta name="api-base-url" content="http://127.0.0.1:8000">
+    <!-- API Configuration: empty => same-origin API on Vercel -->
+    <meta name="api-base-url" content="">
 </head>
 <body>
     <div class="app-container">
@@ -25,10 +25,9 @@
         <header class="header">
             <div class="header-content">
                 <div class="logo">
-                    <i class="fas fa-graduation-cap" aria-hidden="true"></i>
                     <div class="logo-text">
-                        <h1>Student Learning Assistant</h1>
-                        <span class="institution-name">Skill Capital Institute</span>
+                        <h1>Skill Capital Institute</h1>
+                        <span class="institution-name">Student Learning Assistant</span>
                     </div>
                 </div>
                 <div class="header-actions">
@@ -57,7 +56,7 @@
                                 <p>I'm here to help you with your studies and answer questions about your course materials. You can ask me about:</p>
                                 <ul>
                                     <li>📚 Course content and concepts</li>
-                                    <li>📖 Study materials and resources</li>
+                                    <li>📖 Study materials and resources</li> 
                                     <li>💡 Learning strategies and tips</li>
                                     <li>❓ Assignment questions and clarifications</li>
                                 </ul>

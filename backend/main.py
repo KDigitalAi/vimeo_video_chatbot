@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 from weakref import WeakValueDictionary
 
 # Lazy imports for memory optimization
-try:
+try:  
     from fastapi import FastAPI, Request, HTTPException, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.middleware.trustedhost import TrustedHostMiddleware

@@ -4,8 +4,13 @@
 ############################################################
 
 # Web Framework
-fastapi==0.115.0
-uvicorn==0.31.1
+fastapi>=0.95.0
+uvicorn>=0.20.0
+Flask==2.2.5
+werkzeug>=2.2.0
+requests
+gunicorn
+
 
 # Configuration & Settings
 python-dotenv==1.0.1

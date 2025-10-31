@@ -15,11 +15,10 @@ def _get_langchain_imports():
         logger.error(f"Failed to import LangChain modules: {e}")
         raise
 
-@lru_cache(maxsize=4)
 def get_conversational_chain(vector_store, temperature: float = 0.0, k: int = 3):
     """
-    Create conversational chain with caching to reduce initialization overhead.
-    Optimized for memory efficiency.
+    Create conversational chain for a specific session.
+    Each call creates a new chain with its own memory to ensure session isolation.
     """
     # Check memory before processing
     if not check_memory_threshold():
@@ -71,4 +70,3 @@ def get_conversational_chain(vector_store, temperature: float = 0.0, k: int = 3)
         logger.error(f"Failed to create conversational chain: {e}")
         cleanup_memory()
         raise
-

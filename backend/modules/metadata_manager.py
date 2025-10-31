@@ -2,12 +2,20 @@
 import json
 import gc
 from pathlib import Path
+import os
 from functools import lru_cache
 from typing import Dict, Optional
 from backend.modules.utils import logger, log_memory_usage, cleanup_memory, check_memory_threshold
 
-META_DIR = Path("backend/data/metadata")
-META_DIR.mkdir(parents=True, exist_ok=True)
+# Prefer writable temp directory on serverless environments
+_DEFAULT_META_DIR = os.environ.get("METADATA_DIR", "/tmp/backend_metadata")
+META_DIR = Path(_DEFAULT_META_DIR)
+try:
+    META_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # Fall back to stdout-only logging if directory cannot be created
+    # and avoid raising during import on read-only filesystems
+    pass
 
 # File cache to reduce I/O operations with size limit
 _file_cache = {}
@@ -34,8 +42,12 @@ def save_video_metadata(video_id: str, metadata: Dict) -> str:
             essential_fields = ['name', 'description', 'duration', 'created_time', 'modified_time']
             metadata = {k: v for k, v in metadata.items() if k in essential_fields}
         
-        with p.open("w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+        try:
+            with p.open("w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+        except Exception as write_err:
+            logger.warning(f"Metadata directory not writable; skipping save for {video_id}: {write_err}")
+            return str(p)
         
         # Update cache with size limit
         if len(_file_cache) >= _MAX_CACHE_SIZE:

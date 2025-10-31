@@ -21,22 +21,45 @@ except ImportError:
 _logger_instance = None
 
 def get_logger():
-    """Get singleton logger instance to reduce memory usage."""
+    """Get singleton logger instance to reduce memory usage.
+
+    On serverless (read-only filesystem), avoid creating files/directories and
+    log to stdout instead. If a writable temp directory exists, prefer /tmp.
+    """
     global _logger_instance
     if _logger_instance is None:
-        LOG_DIR = Path("backend/logs")
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        
         _logger_instance = logging.getLogger("vimeo_chatbot")
         _logger_instance.setLevel(logging.INFO)
-        
-        # Only add handler if not already present
+
         if not _logger_instance.handlers:
-            fh = logging.FileHandler(LOG_DIR / "chatbot.log")
             formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-            fh.setFormatter(formatter)
-            _logger_instance.addHandler(fh)
-    
+
+            # Detect read-only envs like Vercel and prefer stdout logging
+            vercel_env = os.environ.get("VERCEL") or os.environ.get("NOW_BUILDER")
+
+            # Attempt to use /tmp if available and not readonly
+            tmp_dir = Path("/tmp/backend_logs")
+            use_file = False
+            try:
+                if not vercel_env:
+                    tmp_dir.mkdir(parents=True, exist_ok=True)
+                    test_path = tmp_dir / ".writable"
+                    with open(test_path, "w") as f:
+                        f.write("ok")
+                    test_path.unlink(missing_ok=True)
+                    use_file = True
+            except Exception:
+                use_file = False
+
+            if use_file:
+                fh = logging.FileHandler(tmp_dir / "chatbot.log")
+                fh.setFormatter(formatter)
+                _logger_instance.addHandler(fh)
+            else:
+                sh = logging.StreamHandler()
+                sh.setFormatter(formatter)
+                _logger_instance.addHandler(sh)
+
     return _logger_instance
 
 # Use singleton logger
