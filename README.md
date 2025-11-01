@@ -157,12 +157,8 @@ vimeo_video_chatbot/
 ├── serve_frontend.py                 # Frontend development server
 ├── start_servers.bat                 # Windows startup script
 ├── start_servers.ps1                 # PowerShell startup script
-├── test_env.py                       # Environment testing script
-├── test_live_server.bat              # VS Code Live Server test
 ├── supabase_migrations.sql           # Database schema & functions
 ├── requirements.txt                  # Python dependencies
-├── pyproject.toml                    # Python project configuration
-├── package.json                      # Node.js dependencies (optional)
 └── README.md                         # This file
 ```
 
