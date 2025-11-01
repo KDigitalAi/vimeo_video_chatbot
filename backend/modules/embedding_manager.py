@@ -25,9 +25,15 @@ def get_embeddings_instance():
         logger.warning("Memory usage high before creating embeddings instance")
         cleanup_memory()
     
-    # Double-check that the API key is available
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY not found in environment variables. Please check your .env file.")
+    # Double-check that the API key is available (try settings first, then environment)
+    api_key = os.environ.get("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    if not api_key or not api_key.strip():
+        raise ValueError("OPENAI_API_KEY not found in environment variables or settings. Please check your .env file.")
+    
+    # Ensure API key is set in environment for LangChain
+    if api_key and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = api_key
+        logger.info("OPENAI_API_KEY set in environment from settings")
     
     try:
         # Lazy load OpenAIEmbeddings

@@ -57,6 +57,9 @@ yt-dlp>=2024.12.13
 # Numerical Computing (vector_store.py)
 numpy>=1.26.0
 
+# Text Processing & Pattern Matching
+regex>=2024.0.0
+
 # PDF Processing Dependencies
 PyPDF2>=3.0.0
 PyMuPDF>=1.23.0

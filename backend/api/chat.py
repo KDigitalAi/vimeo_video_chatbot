@@ -5,7 +5,7 @@ Implements JWT authentication and comprehensive input validation.
 """
 import time
 import uuid
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Body
 from fastapi.security import HTTPBearer
 from backend.modules.vector_store import load_supabase_vectorstore
 from backend.modules.retriever_chain import get_conversational_chain
@@ -375,7 +375,7 @@ Topic Context (may be empty): {topic_context}
 
 @router.post("/query", response_model=ChatResponse)
 async def query_chat(
-    request_data: dict,
+    request_data: dict = Body(...),
     # credentials: HTTPAuthorizationCredentials = Depends(security)  # Uncomment when auth is needed
 ):
     """
@@ -467,6 +467,11 @@ async def query_chat(
                 timestamp=time.time()
             )
 
+        # Initialize answer and sources early to ensure they're always defined
+        answer = "I'm sorry, but I encountered an error processing your query. Please try again."
+        sources = []
+        session_id = request.conversation_id or str(uuid.uuid4())
+        
         # Load vector store for video content queries
         try:
             global _global_vector_store
@@ -561,16 +566,87 @@ async def query_chat(
             
             # Generate embedding for the search query (either original or previous topic)
             try:
+                # Verify API key is available before attempting embedding generation
+                api_key = settings.OPENAI_API_KEY
+                if not api_key or not api_key.strip():
+                    raise ValueError("OPENAI_API_KEY is empty or not set in .env file")
+                
+                if not api_key.startswith("sk-"):
+                    raise ValueError(f"OPENAI_API_KEY format is invalid (should start with 'sk-', got: {api_key[:10]}...)")
+                
+                # Ensure API key is set in environment (required by LangChain)
+                import os
+                if not os.environ.get("OPENAI_API_KEY"):
+                    os.environ["OPENAI_API_KEY"] = api_key
+                    logger.info("OPENAI_API_KEY set in environment from settings")
+                
+                logger.info(f"Generating embedding for query: '{search_query[:50]}...' (API key present: {api_key[:10]}...{api_key[-4:]})")
+                
                 embeddings = get_embeddings_instance()
                 query_embedding = embeddings.embed_query(search_query)
+                
+                if not query_embedding or len(query_embedding) == 0:
+                    raise ValueError("Embedding generation returned empty result")
+                
+                logger.info(f"Successfully generated embedding (dimension: {len(query_embedding)})")
+                
             except HTTPException:
                 raise
-            except Exception as embed_err:
-                logger.exception("Failed to generate embeddings: %s", str(embed_err))
-                # Likely configuration or upstream service issue (e.g., API key)
+            except ValueError as ve:
+                error_msg = str(ve)
+                logger.error(f"Embedding validation error: {error_msg}")
+                
+                # Provide specific error message based on validation error
+                if "OPENAI_API_KEY" in error_msg or "API key" in error_msg or "empty" in error_msg.lower():
+                    detail_msg = f"OpenAI API key configuration error: {error_msg}. Please check your OPENAI_API_KEY in .env file."
+                else:
+                    detail_msg = f"Embedding validation failed: {error_msg}"
+                
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Embeddings service unavailable"
+                    detail=detail_msg
+                )
+            except Exception as embed_err:
+                import traceback
+                error_str = str(embed_err)
+                error_traceback = traceback.format_exc()
+                
+                # Log the ACTUAL error with full details for debugging
+                logger.exception(f"Failed to generate embeddings: {type(embed_err).__name__}: {error_str}")
+                logger.error(f"Full traceback:\n{error_traceback}")
+                
+                # Check for specific error types to provide helpful messages
+                api_key_issue = False
+                network_issue = False
+                rate_limit_issue = False
+                
+                if "401" in error_str or "invalid" in error_str.lower() or "api key" in error_str.lower() or "authentication" in error_str.lower():
+                    api_key_issue = True
+                    logger.error("CRITICAL: OpenAI API key appears to be invalid or expired")
+                elif "connection" in error_str.lower() or "timeout" in error_str.lower() or "network" in error_str.lower() or "connect" in error_str.lower():
+                    network_issue = True
+                    logger.error("CRITICAL: Network issue connecting to OpenAI API")
+                elif "rate limit" in error_str.lower() or "429" in error_str or "quota" in error_str.lower():
+                    rate_limit_issue = True
+                    logger.error("CRITICAL: OpenAI API rate limit or quota exceeded")
+                
+                # Provide specific error message based on issue type
+                if api_key_issue:
+                    detail_msg = "OpenAI API key is invalid or expired. Please check your OPENAI_API_KEY in .env file and ensure it's valid."
+                elif network_issue:
+                    detail_msg = "Unable to connect to OpenAI API. Please check your network connection and try again."
+                elif rate_limit_issue:
+                    detail_msg = "OpenAI API rate limit exceeded. Please wait a few minutes and try again."
+                else:
+                    # Include actual error in development mode for debugging
+                    if settings.is_development:
+                        detail_msg = f"Embeddings service error: {error_str[:200]}"  # Limit length
+                    else:
+                        detail_msg = "Embeddings service temporarily unavailable. Please try again later."
+                
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=detail_msg
                 )
             
             # Search for relevant documents - increased k for more comprehensive results
@@ -817,12 +893,25 @@ Please provide a comprehensive, educational response using the course materials 
                             "source_name": source_name
                         })
             
+        except HTTPException:
+            # Re-raise HTTPExceptions (like embedding errors) so they're properly handled
+            raise
         except Exception as e:
-            logger.exception("Error during similarity search: %s", str(e))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error processing query"
-            )
+            import traceback
+            error_msg = str(e)
+            error_traceback = traceback.format_exc()
+            logger.exception(f"Error during similarity search: {type(e).__name__}: {error_msg}")
+            logger.error(f"Full traceback: {error_traceback}")
+            
+            # Provide a helpful error message instead of generic one
+            if "api key" in error_msg.lower() or "401" in error_msg or "invalid" in error_msg.lower():
+                answer = "I'm unable to process your query because the OpenAI API key is invalid or expired. Please check your API configuration."
+            elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
+                answer = "I'm currently unable to connect to the knowledge base. Please try again in a moment."
+            else:
+                answer = f"I encountered an error while processing your query: {error_msg}"
+            
+            sources = []
         
         processing_time = time.time() - start_time
         
@@ -894,10 +983,14 @@ Please provide a comprehensive, educational response using the course materials 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Unexpected error in query_chat")
+        import traceback
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        logger.exception(f"Unexpected error in query_chat: {type(e).__name__}: {error_msg}")
+        logger.error(f"Full traceback: {error_traceback}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
+            detail=f"Error processing query: {error_msg}"
         )
 
 

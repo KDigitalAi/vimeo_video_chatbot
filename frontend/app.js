@@ -25,12 +25,22 @@ class VimeoChatbot {
         this.messageInput = this._getCachedElement('messageInput');
         this.sendBtn = this._getCachedElement('sendBtn');
         this.clearChatBtn = this._getCachedElement('clearChatBtn');
+        this.historyBtn = this._getCachedElement('historyBtn');
+        this.newChatBtn = this._getCachedElement('newChatBtn');
         this.loadingOverlay = this._getCachedElement('loadingOverlay');
         this.errorModal = this._getCachedElement('errorModal');
         this.errorMessage = this._getCachedElement('errorMessage');
         this.closeErrorModal = this._getCachedElement('closeErrorModal');
         this.dismissError = this._getCachedElement('dismissError');
         this.charCount = this._getCachedElement('charCount');
+        
+        // Chat history elements
+        this.historySidebar = this._getCachedElement('chatHistorySidebar');
+        this.toggleHistoryBtn = this._getCachedElement('toggleHistoryBtn');
+        this.historyContent = this._getCachedElement('historyContent');
+        this.historyLoading = this._getCachedElement('historyLoading');
+        this.historyEmpty = this._getCachedElement('historyEmpty');
+        this.historyList = this._getCachedElement('historyList');
         
         // Educational features
         this.accessibilityToggle = this._getCachedElement('accessibilityToggle');
@@ -61,6 +71,19 @@ class VimeoChatbot {
 
         // Clear chat with throttling
         this.clearChatBtn.addEventListener('click', this._throttle(() => this.clearChat(), 300));
+
+        // New chat with throttling
+        if (this.newChatBtn) {
+            this.newChatBtn.addEventListener('click', this._throttle(() => this.newChat(), 300));
+        }
+
+        // Chat history with throttling
+        if (this.historyBtn) {
+            this.historyBtn.addEventListener('click', this._throttle(() => this.toggleHistorySidebar(), 300));
+        }
+        if (this.toggleHistoryBtn) {
+            this.toggleHistoryBtn.addEventListener('click', this._throttle(() => this.toggleHistorySidebar(), 300));
+        }
 
         // Educational features
         
@@ -185,11 +208,11 @@ class VimeoChatbot {
         
         // Change color if approaching limit
         if (count > 1800) {
-            this.charCount.style.color = '#ef4444';
+            this.charCount.style.color = '#E91E63';
         } else if (count > 1500) {
-            this.charCount.style.color = '#f59e0b';
+            this.charCount.style.color = '#F48FB1';
         } else {
-            this.charCount.style.color = '#9ca3af';
+            this.charCount.style.color = '#212121';
         }
     }
 
@@ -236,6 +259,10 @@ class VimeoChatbot {
             if (response.conversation_id) {
                 this.conversationId = response.conversation_id;
             }
+
+            // Save conversation locally and refresh history
+            this.saveConversationToLocal(message, response.answer);
+            this.refreshChatHistory();
 
         } catch (error) {
             console.error('❌ Error sending message:', error);
@@ -338,7 +365,12 @@ class VimeoChatbot {
 
         const avatar = document.createElement('div');
         avatar.className = 'message-avatar';
-        avatar.innerHTML = sender === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
+        if (sender === 'user') {
+            avatar.innerHTML = '<i class="fas fa-user"></i>';
+        } else {
+            // Use custom logo image instead of robot icon
+            avatar.innerHTML = '<img src="logo.png" alt="Chatbot" class="bot-avatar-img">';
+        }
 
         const content = document.createElement('div');
         content.className = 'message-content';
@@ -534,6 +566,94 @@ class VimeoChatbot {
         }
     }
 
+    // Start a new chat conversation
+    newChat() {
+        // Find the original welcome message if it exists
+        let welcomeMessage = null;
+        const messages = this.chatContainer.querySelectorAll('.message');
+        for (const msg of messages) {
+            if (msg.classList.contains('bot-message')) {
+                const textContent = msg.textContent || '';
+                if (textContent.includes('Welcome to your Learning Assistant') || 
+                    textContent.includes('what would you like to know today')) {
+                    welcomeMessage = msg.cloneNode(true);
+                    break;
+                }
+            }
+        }
+        
+        // Ultra-optimized DOM clearing
+        while (this.chatContainer.firstChild) {
+            this.chatContainer.removeChild(this.chatContainer.firstChild);
+        }
+        
+        // If no welcome message found, recreate it from the original HTML structure
+        if (!welcomeMessage) {
+            welcomeMessage = document.createElement('div');
+            welcomeMessage.className = 'message bot-message';
+            welcomeMessage.setAttribute('role', 'article');
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.setAttribute('aria-hidden', 'true');
+            avatar.innerHTML = '<img src="logo.png" alt="Chatbot" class="bot-avatar-img">';
+            
+            const content = document.createElement('div');
+            content.className = 'message-content';
+            
+            const text = document.createElement('div');
+            text.className = 'message-text';
+            text.innerHTML = `
+                <h3>Welcome to your Learning Assistant! 🎓</h3>
+                <p>I'm here to help you with your studies and answer questions about your course materials. You can ask me about:</p>
+                <ul>
+                    <li>📚 Course content and concepts</li>
+                    <li>📖 Study materials and resources</li>
+                    <li>💡 Learning strategies and tips</li>
+                    <li>❓ Assignment questions and clarifications</li>
+                </ul>
+                <p><strong>What would you like to learn about today?</strong></p>
+            `;
+            
+            const time = document.createElement('div');
+            time.className = 'message-time';
+            time.setAttribute('aria-label', 'Message timestamp');
+            const timeSpan = document.createElement('span');
+            timeSpan.id = 'welcomeTime';
+            timeSpan.textContent = this.formatTime(new Date());
+            time.appendChild(timeSpan);
+            
+            content.appendChild(text);
+            content.appendChild(time);
+            
+            welcomeMessage.appendChild(avatar);
+            welcomeMessage.appendChild(content);
+        }
+        
+        this.chatContainer.appendChild(welcomeMessage);
+        
+        // Generate new conversation ID
+        this.conversationId = this.generateConversationId();
+        
+        // Clear input field
+        this.messageInput.value = '';
+        this.updateCharCount();
+        this.autoResizeTextarea();
+        
+        // Refresh chat history if sidebar is open
+        if (this.historySidebar && !this.historySidebar.classList.contains('hidden')) {
+            this.refreshChatHistory();
+        }
+        
+        // Ultra-optimized scroll to top
+        requestAnimationFrame(() => {
+            this.chatContainer.scrollTop = 0;
+        });
+        
+        // Focus on input for better UX
+        this.messageInput.focus();
+    }
+
     // Educational features
 
     toggleAccessibility() {
@@ -565,6 +685,387 @@ class VimeoChatbot {
         }
     }
 
+    // Chat History Management
+
+    // Toggle history sidebar visibility
+    toggleHistorySidebar() {
+        if (!this.historySidebar) return;
+        
+        const isHidden = this.historySidebar.classList.contains('hidden');
+        if (isHidden) {
+            this.historySidebar.classList.remove('hidden');
+            this.loadChatHistory();
+        } else {
+            this.historySidebar.classList.add('hidden');
+        }
+    }
+
+    // Load chat history from backend or localStorage
+    async loadChatHistory() {
+        if (!this.historyList || !this.historyLoading || !this.historyEmpty) return;
+
+        // Show loading state
+        this.historyLoading.style.display = 'flex';
+        this.historyEmpty.style.display = 'none';
+        this.historyList.innerHTML = '';
+
+        try {
+            // Try to fetch from backend first
+            const backendHistory = await this.fetchChatHistoryFromBackend();
+            
+            if (backendHistory && backendHistory.length > 0) {
+                this.displayHistoryItems(backendHistory);
+            } else {
+                // Fallback to localStorage
+                const localHistory = this.getChatHistoryFromLocal();
+                if (localHistory && localHistory.length > 0) {
+                    this.displayHistoryItems(localHistory);
+                } else {
+                    this.showEmptyHistory();
+                }
+            }
+        } catch (error) {
+            console.error('Error loading chat history:', error);
+            // Fallback to localStorage on error
+            const localHistory = this.getChatHistoryFromLocal();
+            if (localHistory && localHistory.length > 0) {
+                this.displayHistoryItems(localHistory);
+            } else {
+                this.showEmptyHistory();
+            }
+        } finally {
+            this.historyLoading.style.display = 'none';
+        }
+    }
+
+    // Refresh chat history (used after sending a message)
+    refreshChatHistory() {
+        if (this.historySidebar && !this.historySidebar.classList.contains('hidden')) {
+            this.loadChatHistory();
+        }
+    }
+
+    // Fetch chat history from backend API
+    async fetchChatHistoryFromBackend() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/sessions/${this.userId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.sessions && data.sessions.length > 0) {
+                    // Fetch detailed history for each session
+                    const historyPromises = data.sessions.slice(0, 20).map(session => 
+                        this.fetchSessionHistory(session.session_id)
+                    );
+                    const histories = await Promise.all(historyPromises);
+                    return histories.filter(h => h !== null);
+                }
+            }
+            return [];
+        } catch (error) {
+            console.error('Error fetching chat history from backend:', error);
+            return [];
+        }
+    }
+
+    // Fetch detailed history for a specific session
+    async fetchSessionHistory(sessionId) {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/history/${this.userId}?session_id=${sessionId}&limit=1`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.history && data.history.length > 0) {
+                    const record = data.history[0];
+                    return {
+                        session_id: sessionId,
+                        user_message: record.user_message || '',
+                        bot_response: record.bot_response || '',
+                        created_at: record.created_at || new Date().toISOString()
+                    };
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('Error fetching session history:', error);
+            return null;
+        }
+    }
+
+    // Get chat history from localStorage (fallback)
+    getChatHistoryFromLocal() {
+        try {
+            const historyKey = `chat_history_${this.userId}`;
+            const historyJson = localStorage.getItem(historyKey);
+            if (historyJson) {
+                const history = JSON.parse(historyJson);
+                // Return most recent 20 items
+                return history.slice(-20).reverse();
+            }
+        } catch (error) {
+            console.error('Error reading chat history from localStorage:', error);
+        }
+        return [];
+    }
+
+    // Save conversation to localStorage
+    saveConversationToLocal(userMessage, botResponse) {
+        try {
+            const historyKey = `chat_history_${this.userId}`;
+            let history = this.getChatHistoryFromLocal();
+            
+            history.push({
+                session_id: this.conversationId,
+                user_message: userMessage,
+                bot_response: botResponse,
+                created_at: new Date().toISOString()
+            });
+
+            // Keep only last 50 conversations
+            if (history.length > 50) {
+                history = history.slice(-50);
+            }
+
+            localStorage.setItem(historyKey, JSON.stringify(history));
+        } catch (error) {
+            console.error('Error saving conversation to localStorage:', error);
+        }
+    }
+
+    // Display history items in the sidebar
+    displayHistoryItems(items) {
+        if (!this.historyList) return;
+
+        this.historyList.innerHTML = '';
+        this.historyEmpty.style.display = 'none';
+
+        items.forEach(item => {
+            const historyItem = this.createHistoryItem(item);
+            this.historyList.appendChild(historyItem);
+        });
+    }
+
+    // Create a history item element
+    createHistoryItem(item) {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'history-item';
+        itemDiv.dataset.sessionId = item.session_id;
+
+        // Format time
+        const date = new Date(item.created_at);
+        const timeStr = this.formatTime(date);
+        const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+        // Get preview text
+        const userMsg = item.user_message || 'No message';
+        const botMsg = item.bot_response || 'No response';
+        const botPreview = botMsg.length > 100 ? botMsg.substring(0, 100) + '...' : botMsg;
+
+        itemDiv.innerHTML = `
+            <div class="history-item-header">
+                <span class="history-item-time">${timeStr} • ${dateStr}</span>
+                <button class="history-item-delete" aria-label="Delete chat" data-session-id="${item.session_id}">
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                    <span class="delete-tooltip">Delete</span>
+                </button>
+            </div>
+            <div class="history-item-user">${this.escapeHtml(userMsg)}</div>
+            <div class="history-item-bot">${this.escapeHtml(botPreview)}</div>
+        `;
+
+        // Add click handler to load conversation (excluding delete button clicks)
+        itemDiv.addEventListener('click', (e) => {
+            // Don't trigger load if clicking the delete button
+            if (!e.target.closest('.history-item-delete')) {
+                this.loadConversationFromHistory(item.session_id);
+            }
+        });
+
+        // Add delete button click handler
+        const deleteBtn = itemDiv.querySelector('.history-item-delete');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent triggering the item click
+                this.deleteHistoryItem(item.session_id, itemDiv);
+            });
+        }
+
+        return itemDiv;
+    }
+
+    // Show empty history state
+    showEmptyHistory() {
+        if (!this.historyList || !this.historyEmpty) return;
+        
+        this.historyList.innerHTML = '';
+        this.historyEmpty.style.display = 'flex';
+    }
+
+    // Load a conversation from history
+    async loadConversationFromHistory(sessionId) {
+        try {
+            // Update active state in history list
+            const historyItems = this.historyList.querySelectorAll('.history-item');
+            historyItems.forEach(item => {
+                if (item.dataset.sessionId === sessionId) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+
+            // Fetch full conversation history
+            const response = await fetch(`${this.apiBaseUrl}/chat/history/${this.userId}?session_id=${sessionId}&limit=100`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.history && data.history.length > 0) {
+                    // Update conversation ID
+                    this.conversationId = sessionId;
+
+                    // Clear current chat (keep welcome message)
+                    const welcomeMessage = this.chatContainer.querySelector('.bot-message');
+                    while (this.chatContainer.firstChild) {
+                        this.chatContainer.removeChild(this.chatContainer.firstChild);
+                    }
+                    if (welcomeMessage) {
+                        this.chatContainer.appendChild(welcomeMessage);
+                    }
+
+                    // Load messages from history
+                    data.history.forEach(record => {
+                        if (record.user_message) {
+                            this.addMessageToChat(record.user_message, 'user');
+                        }
+                        if (record.bot_response) {
+                            this.addMessageToChat(record.bot_response, 'bot');
+                        }
+                    });
+
+                    // Scroll to bottom
+                    this.scrollToBottom();
+                }
+            } else {
+                // Fallback: try loading from localStorage
+                this.loadConversationFromLocal(sessionId);
+            }
+        } catch (error) {
+            console.error('Error loading conversation from history:', error);
+            // Fallback: try loading from localStorage
+            this.loadConversationFromLocal(sessionId);
+        }
+    }
+
+    // Delete a chat history item
+    async deleteHistoryItem(sessionId, itemElement) {
+        // Confirm deletion
+        if (!confirm('Are you sure you want to delete this chat?')) {
+            return;
+        }
+
+        try {
+            // Try to delete from backend first
+            const response = await fetch(`${this.apiBaseUrl}/chat/session/${this.userId}/${sessionId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (response.ok || response.status === 404) {
+                // 404 means it was already deleted or doesn't exist - still successful
+                console.log(`Chat session ${sessionId} deleted from backend`);
+            } else {
+                console.warn(`Failed to delete session from backend: ${response.status}`);
+            }
+        } catch (error) {
+            console.error('Error deleting chat session from backend:', error);
+            // Continue with localStorage deletion even if backend fails
+        }
+
+        // Delete from localStorage
+        try {
+            const historyKey = `chat_history_${this.userId}`;
+            const historyJson = localStorage.getItem(historyKey);
+            if (historyJson) {
+                let history = JSON.parse(historyJson);
+                history = history.filter(item => item.session_id !== sessionId);
+                localStorage.setItem(historyKey, JSON.stringify(history));
+            }
+        } catch (error) {
+            console.error('Error deleting chat session from localStorage:', error);
+        }
+
+        // Remove from UI immediately
+        if (itemElement && itemElement.parentNode) {
+            itemElement.remove();
+        }
+
+        // If this was the active conversation, start a new chat
+        if (this.conversationId === sessionId) {
+            this.newChat();
+        }
+
+        // Refresh history list if empty
+        const remainingItems = this.historyList.querySelectorAll('.history-item');
+        if (remainingItems.length === 0) {
+            this.showEmptyHistory();
+        }
+    }
+
+    // Load conversation from localStorage (fallback)
+    loadConversationFromLocal(sessionId) {
+        try {
+            const history = this.getChatHistoryFromLocal();
+            const sessionHistory = history.filter(item => item.session_id === sessionId);
+
+            if (sessionHistory.length > 0) {
+                // Update conversation ID
+                this.conversationId = sessionId;
+
+                // Clear current chat (keep welcome message)
+                const welcomeMessage = this.chatContainer.querySelector('.bot-message');
+                while (this.chatContainer.firstChild) {
+                    this.chatContainer.removeChild(this.chatContainer.firstChild);
+                }
+                if (welcomeMessage) {
+                    this.chatContainer.appendChild(welcomeMessage);
+                }
+
+                // Load messages from history
+                sessionHistory.forEach(item => {
+                    if (item.user_message) {
+                        this.addMessageToChat(item.user_message, 'user');
+                    }
+                    if (item.bot_response) {
+                        this.addMessageToChat(item.bot_response, 'bot');
+                    }
+                });
+
+                // Scroll to bottom
+                this.scrollToBottom();
+            }
+        } catch (error) {
+            console.error('Error loading conversation from localStorage:', error);
+            this.showError('Failed to load conversation from history.');
+        }
+    }
+
     // Health check method
     async checkBackendHealth() {
         try {
@@ -589,6 +1090,27 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize educational features
     chatbot.initializeAccessibility();
+    
+    // Initialize chat history sidebar (hidden by default on mobile, visible on desktop)
+    if (window.innerWidth <= 1024) {
+        if (chatbot.historySidebar) {
+            chatbot.historySidebar.classList.add('hidden');
+        }
+    } else {
+        // Load history on desktop by default
+        if (chatbot.historySidebar) {
+            chatbot.loadChatHistory();
+        }
+    }
+    
+    // Handle window resize to show/hide sidebar appropriately
+    window.addEventListener('resize', () => {
+        if (window.innerWidth <= 1024 && chatbot.historySidebar) {
+            if (!chatbot.historySidebar.classList.contains('hidden')) {
+                chatbot.historySidebar.classList.add('hidden');
+            }
+        }
+    });
     
     // Backend health check with timeout
     chatbot.checkBackendHealth().then(isHealthy => {

@@ -287,11 +287,16 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """Ultra-optimized HTTP exception handler with O(1) complexity."""
     logger.error(f"HTTP error {exc.status_code}: {exc.detail}")
     
+    # Include more details in development mode
+    details = {"status_code": exc.status_code}
+    if settings.is_development and exc.detail:
+        details["error_detail"] = str(exc.detail)
+    
     # Ultra-fast error response with pre-computed template
     content = {
         **_HTTP_TEMPLATE,
-        "message": exc.detail,
-        "details": {"status_code": exc.status_code},
+        "message": exc.detail or "Internal server error",
+        "details": details,
         "timestamp": datetime.utcnow().isoformat()
     }
     

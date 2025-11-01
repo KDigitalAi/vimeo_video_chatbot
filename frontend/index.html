@@ -34,6 +34,14 @@
                     <button class="btn-accessibility" id="accessibilityToggle" aria-label="Toggle high contrast mode">
                         <i class="fas fa-universal-access" aria-hidden="true"></i>
                     </button>
+                    <button class="btn-secondary" id="historyBtn" aria-label="View chat history">
+                        <i class="fas fa-history" aria-hidden="true"></i>
+                        <span>History</span>
+                    </button>
+                    <button class="btn-secondary" id="newChatBtn" aria-label="Start new chat">
+                        <i class="fas fa-plus" aria-hidden="true"></i>
+                        <span>New Chat</span>
+                    </button>
                     <button class="btn-secondary" id="clearChatBtn" aria-label="Clear chat history">
                         <i class="fas fa-trash" aria-hidden="true"></i>
                         <span>Clear Chat</span>
@@ -44,11 +52,13 @@
 
         <!-- Main Chat Area -->
         <main class="main-content">
-                <div class="chat-container" id="chatContainer" role="log" aria-live="polite" aria-label="Chat messages">
+            <div class="chat-layout">
+                <div class="chat-main">
+                    <div class="chat-container" id="chatContainer" role="log" aria-live="polite" aria-label="Chat messages">
                     <!-- Educational Welcome Message -->
                     <div class="message bot-message" role="article">
                         <div class="message-avatar" aria-hidden="true">
-                            <i class="fas fa-graduation-cap"></i>
+                            <img src="logo.png" alt="Chatbot" class="bot-avatar-img">
                         </div>
                         <div class="message-content">
                             <div class="message-text">
@@ -67,9 +77,9 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                    </div>
 
-                <!-- Educational Input Area -->
+                    <!-- Educational Input Area -->
                 <div class="input-container">
                     <div class="input-wrapper">
                         <textarea 
@@ -90,6 +100,29 @@
                         <span class="input-hint">Press Enter to send, Shift+Enter for new line</span>
                     </div>
                 </div>
+            </div>
+
+            <!-- Chat History Sidebar -->
+            <aside class="chat-history-sidebar" id="chatHistorySidebar">
+                <div class="history-header">
+                    <h3>Chat History</h3>
+                    <button class="btn-history-toggle" id="toggleHistoryBtn" aria-label="Toggle history panel">
+                        <i class="fas fa-times" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="history-content" id="historyContent">
+                    <div class="history-loading" id="historyLoading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span>Loading history...</span>
+                    </div>
+                    <div class="history-empty" id="historyEmpty" style="display: none;">
+                        <i class="fas fa-inbox"></i>
+                        <p>No chat history yet</p>
+                        <span>Start a conversation to see it here</span>
+                    </div>
+                    <div class="history-list" id="historyList"></div>
+                </div>
+            </aside>
         </main>
 
 
