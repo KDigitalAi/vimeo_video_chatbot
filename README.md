@@ -25,13 +25,13 @@ This section documents the recent sequence of fixes to get the app reliably depl
 - Outcome: `frontend/**` uploaded with the Python function; SPA available in production.
 
 5) a9dab234 – Serverless-safe metadata storage (2025-10-30)
-- Error: `OSError: [Errno 30] Read-only file system: 'backend/data'` during import of `metadata_manager.py`.
-- Change: Write metadata to `/tmp/backend_metadata` (or `$METADATA_DIR`), wrap `mkdir` and writes with try/except; skip write rather than crash if not writable.
-- Outcome: Import succeeds on Vercel’s read-only FS; ingest routes can load.
+- Error: `OSError: [Errno 30] Read-only file system: 'app/data'` during import of `metadata_manager.py`.
+- Change: Write metadata to `/tmp/app_metadata` (or `$METADATA_DIR`), wrap `mkdir` and writes with try/except; skip write rather than crash if not writable.
+- Outcome: Import succeeds on Vercel's read-only FS; ingest routes can load.
 
 6) 5910d363 – Serverless-safe logging (2025-10-30)
-- Error: `Read-only file system: 'backend/logs'` from `utils.get_logger()` trying to create files.
-- Change: Prefer stdout logging; if available, write to `/tmp/backend_logs`; never create `backend/logs` on serverless.
+- Error: `Read-only file system: 'app/logs'` from `utils.get_logger()` trying to create files.
+- Change: Prefer stdout logging; if available, write to `/tmp/app_logs`; never create `app/logs` on serverless.
 - Outcome: App starts with logging to stdout; no FS errors.
 
 7) a4bd5b36 – ci: remove `pyproject.toml` (2025-10-30)
@@ -48,7 +48,7 @@ This section documents the recent sequence of fixes to get the app reliably depl
 - Changes:
   - `runtime.txt` → `3.12`.
   - `requirements.txt` → modern pins (`fastapi>=0.95.0`, `uvicorn>=0.20.0`, `werkzeug>=2.2.0`).
-  - `vercel.json` → builds-only, pointing to `backend/main.py`.
+  - `vercel.json` → builds-only, pointing to `app/main.py`.
   - `pyproject.toml` previously set to `>=3.11` (later removed in a4bd5b36 for lean builds).
 - Outcome: Build uses modern Python and succeeds without pip3.9.
 
@@ -89,7 +89,7 @@ copy config.example .env
 python run_migration.py
 
 # 6. Start the server
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # 7. Open in browser
 # http://127.0.0.1:8000
@@ -119,46 +119,50 @@ User Query → Embedding Search → Context Retrieval → LLM Generation → Res
 
 ```
 vimeo_video_chatbot/
-├── backend/                          # FastAPI backend application
-│   ├── api/                          # API route handlers
-│   │   ├── chat.py                   # Chat query endpoints
-│   │   ├── ingest.py                 # Video ingestion endpoints
-│   │   └── webhooks.py               # Vimeo webhook handlers
-│   ├── core/                         # Core application components
-│   │   ├── settings.py               # Configuration management
-│   │   ├── security.py               # Authentication & security
-│   │   ├── supabase_client.py        # Database client
-│   │   └── validation.py             # Pydantic models
-│   ├── modules/                      # Business logic modules
+├── app/                              # FastAPI backend application
+│   ├── api/                          # API routes
+│   │   └── routes/                   # API route handlers
+│   │       ├── chat.py               # Chat query endpoints
+│   │       ├── ingest.py             # Video ingestion endpoints
+│   │       ├── pdf_ingest.py         # PDF ingestion endpoints
+│   │       └── webhooks.py           # Vimeo webhook handlers
+│   ├── config/                       # Configuration
+│   │   ├── settings.py               # Environment settings
+│   │   └── security.py               # Authentication & security
+│   ├── core/                         # Core functionality
+│   │   └── middleware.py             # Rate limiting middleware
+│   ├── database/                     # Database layer
+│   │   ├── supabase.py               # Supabase client
+│   │   └── migrations.sql            # Database schema & functions
+│   ├── models/                       # Data models
+│   │   └── schemas.py                # Pydantic models
+│   ├── services/                     # Business logic
 │   │   ├── chat_history_manager.py   # Chat storage & retrieval
 │   │   ├── embedding_manager.py      # OpenAI embeddings
 │   │   ├── metadata_manager.py       # Video metadata handling
+│   │   ├── pdf_processor.py          # PDF processing
+│   │   ├── pdf_store.py              # PDF storage
 │   │   ├── retriever_chain.py        # LangChain conversation chain
 │   │   ├── text_processor.py         # Text chunking & processing
 │   │   ├── transcript_manager.py     # Caption/transcript handling
-│   │   ├── utils.py                  # Utility functions
 │   │   ├── vector_store.py           # Supabase vector operations
 │   │   ├── vector_store_direct.py    # Direct vector operations
 │   │   ├── vimeo_loader.py           # Vimeo API integration
 │   │   └── whisper_transcriber.py    # Audio transcription
-│   ├── data/                         # Data storage
-│   │   └── metadata/                 # Video metadata cache
-│   ├── logs/                         # Application logs
-│   │   └── chatbot.log               # Main log file
+│   ├── utils/                        # Utilities
+│   │   ├── cache.py                  # Caching utilities
+│   │   └── logger.py                 # Logging utilities
 │   └── main.py                       # FastAPI application entry point
-├── frontend/                         # Frontend application
-│   ├── index.html                    # Main HTML file
-│   ├── app.js                        # JavaScript application
-│   └── style.css                     # CSS styling
-├── venv/                             # Python virtual environment
-├── config.example                    # Environment configuration template
-├── process_videos.py                 # Video processing script
-├── run_migration.py                  # Database migration script
-├── serve_frontend.py                 # Frontend development server
-├── start_servers.bat                 # Windows startup script
-├── start_servers.ps1                 # PowerShell startup script
-├── supabase_migrations.sql           # Database schema & functions
+├── api/                              # Vercel deployment entry
+│   └── index.py
+<｜tool▁call▁end｜><｜tool▁call▁begin｜>
+read_file
+├── uploads/                          # File uploads
+│   └── pdfs/                         # PDF uploads directory
+├── auto_update_embeddings.py         # Auto-update utility script
 ├── requirements.txt                  # Python dependencies
+├── runtime.txt                       # Python version
+├── vercel.json                       # Vercel deployment config
 └── README.md                         # This file
 ```
 
@@ -270,8 +274,8 @@ brew install ffmpeg
 
 **Option 1: Full Stack (Recommended)**
 ```bash
-# Start the FastAPI server (serves both API and frontend)
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+# Start the FastAPI server
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Access at: http://127.0.0.1:8000
 ```
@@ -288,7 +292,7 @@ start_servers.ps1
 **Option 3: Separate Frontend Server**
 ```bash
 # Terminal 1: Backend
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Terminal 2: Frontend
 python serve_frontend.py
@@ -548,7 +552,7 @@ ffmpeg -version
 python run_migration.py
 
 # Test function exists
-python -c "from backend.core.supabase_client import get_supabase; supabase = get_supabase(); result = supabase.rpc('match_video_embeddings', {'query_embedding': [0.0]*1536, 'match_count': 1}).execute(); print('Function works:', len(result.data))"
+python -c "from app.database.supabase import get_supabase; supabase = get_supabase(); result = supabase.rpc('match_video_embeddings', {'query_embedding': [0.0]*1536, 'match_count': 1}).execute(); print('Function works:', len(result.data))"
 ```
 
 **5. OpenAI API Errors**
@@ -563,10 +567,10 @@ python -c "from openai import OpenAI; client = OpenAI(); print('API works:', cli
 **6. Vector Search Not Working**
 ```bash
 # Check if embeddings exist
-python -c "from backend.core.supabase_client import get_supabase; supabase = get_supabase(); result = supabase.table('video_embeddings').select('*').limit(1).execute(); print('Embeddings exist:', len(result.data))"
+python -c "from app.database.supabase import get_supabase; supabase = get_supabase(); result = supabase.table('video_embeddings').select('*').limit(1).execute(); print('Embeddings exist:', len(result.data))"
 
 # Verify pgvector extension
-python -c "from backend.core.supabase_client import get_supabase; supabase = get_supabase(); result = supabase.rpc('exec_sql', {'sql': 'SELECT * FROM pg_extension WHERE extname = \\'vector\\''}).execute(); print('pgvector installed:', len(result.data))"
+python -c "from app.database.supabase import get_supabase; supabase = get_supabase(); result = supabase.rpc('exec_sql', {'sql': 'SELECT * FROM pg_extension WHERE extname = \\'vector\\''}).execute(); print('pgvector installed:', len(result.data))"
 ```
 
 ## Testing & Verification
@@ -578,13 +582,13 @@ python test_env.py
 
 ### 2. Database Connection
 ```bash
-python -c "from backend.core.supabase_client import test_connection; test_connection()"
+python -c "from app.database.supabase import test_connection; test_connection()"
 ```
 
 ### 3. End-to-End Chat Test
 ```bash
 # Start server
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Test greeting
 curl -X POST "http://127.0.0.1:8000/chat/query" \
@@ -601,7 +605,7 @@ curl -X POST "http://127.0.0.1:8000/chat/query" \
 ```bash
 # Process a single video
 python -c "
-from backend.modules.vimeo_loader import get_user_videos
+from app.services.vimeo_loader import get_user_videos
 videos = get_user_videos(limit=1)
 if videos:
     print('Videos found:', len(videos))
@@ -662,7 +666,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
 EXPOSE 8000
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 **Cloud Deployment:**

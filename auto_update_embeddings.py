@@ -15,15 +15,15 @@ import logging
 # Add project root to path
 sys.path.append('.')
 
-from backend.core.settings import settings
-from backend.core.supabase_client import get_supabase
-from backend.modules.vimeo_loader import get_user_videos
-from backend.modules.transcript_manager import get_transcript_segments_from_vimeo
-from backend.modules.whisper_transcriber import transcribe_vimeo_audio
-from backend.modules.pdf_processor import process_pdf_file
-from backend.modules.text_processor import make_chunks_with_metadata
-from backend.modules.vector_store_direct import store_embeddings_directly
-from backend.modules.embedding_manager import get_embeddings_instance
+from app.config.settings import settings
+from app.database.supabase import get_supabase
+from app.services.vimeo_loader import get_user_videos
+from app.services.transcript_manager import get_transcript_segments_from_vimeo
+from app.services.whisper_transcriber import transcribe_vimeo_audio
+from app.services.pdf_processor import process_pdf_file
+from app.services.text_processor import make_chunks_with_metadata
+from app.services.vector_store_direct import store_embeddings_directly
+from app.services.embedding_manager import get_embeddings_instance
 
 # Configure logging
 logging.basicConfig(

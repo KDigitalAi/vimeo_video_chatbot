@@ -1,6 +1,6 @@
 # Core Dependencies for Vimeo Video Chatbot
 # Python 3.12 Compatible - All packages tested and verified
-# Comprehensive analysis of backend/modules and backend/api folder dependencies
+# Comprehensive analysis of app/services and app/api/routes folder dependencies
 ############################################################
 
 # Web Framework
