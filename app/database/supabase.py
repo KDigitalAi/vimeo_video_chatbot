@@ -7,23 +7,29 @@ from app.services.vector_store_direct import get_supabase_direct
 _supabase_client: Optional[Any] = None
 
 def get_supabase():
-    """Get Supabase client singleton with validation."""
+    """Get Supabase client singleton with validation - serverless-safe."""
     global _supabase_client
     
     if _supabase_client is None:
-        url_valid = settings.SUPABASE_URL and not settings.SUPABASE_URL.startswith("your_")
-        key_valid = settings.SUPABASE_SERVICE_KEY and not settings.SUPABASE_SERVICE_KEY.startswith("your_")
-        
-        if not url_valid:
-            raise ValueError("SUPABASE_URL is not properly configured. Please set a valid Supabase URL in your .env file.")
-        
-        if not key_valid:
-            raise ValueError("SUPABASE_SERVICE_KEY is not properly configured. Please set a valid Supabase service key in your .env file.")
-        
         try:
+            url_valid = settings.SUPABASE_URL and not settings.SUPABASE_URL.startswith("your_")
+            key_valid = settings.SUPABASE_SERVICE_KEY and not settings.SUPABASE_SERVICE_KEY.startswith("your_")
+            
+            if not url_valid:
+                from app.utils.logger import logger
+                logger.warning("SUPABASE_URL is not properly configured")
+                raise ValueError("SUPABASE_URL is not properly configured")
+            
+            if not key_valid:
+                from app.utils.logger import logger
+                logger.warning("SUPABASE_SERVICE_KEY is not properly configured")
+                raise ValueError("SUPABASE_SERVICE_KEY is not properly configured")
+            
             _supabase_client = get_supabase_direct()
         except Exception as e:
-            raise ValueError(f"Failed to create Supabase client: {e}. Please check your SUPABASE_URL and SUPABASE_SERVICE_KEY.")
+            from app.utils.logger import logger
+            logger.error(f"Failed to create Supabase client: {e}")
+            raise
     
     return _supabase_client
 
