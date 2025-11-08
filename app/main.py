@@ -2,6 +2,7 @@
 FastAPI application for Vimeo Video Chatbot.
 RAG-powered chatbot for querying video content.
 """
+import os
 import time
 import gc
 from datetime import datetime
@@ -42,11 +43,18 @@ app.add_middleware(
     compresslevel=6
 )
 
-if settings.is_production:
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=["yourdomain.com", "*.yourdomain.com"]
-    )
+# TrustedHostMiddleware - only enable if TRUSTED_HOSTS is set
+trusted_hosts = os.getenv("TRUSTED_HOSTS", "").strip()
+if trusted_hosts and settings.is_production:
+    try:
+        hosts = [h.strip() for h in trusted_hosts.split(",") if h.strip()]
+        if hosts:
+            app.add_middleware(
+                TrustedHostMiddleware,
+                allowed_hosts=hosts
+            )
+    except Exception as e:
+        logger.warning(f"Failed to configure TrustedHostMiddleware: {e}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,10 +98,26 @@ def get_router(router_name: str):
         logger.error(f"Failed to import {router_name} router: {e}")
         raise
 
-app.include_router(get_router("webhooks"))
-app.include_router(get_router("chat"), prefix="/chat", tags=["chat"])
-app.include_router(get_router("ingest"), prefix="/ingest", tags=["ingest"])
-app.include_router(get_router("pdf"), prefix="/pdf", tags=["pdf"])
+# Include routers with error handling for serverless safety
+try:
+    app.include_router(get_router("webhooks"))
+except Exception as e:
+    logger.warning(f"Failed to load webhooks router: {e}")
+
+try:
+    app.include_router(get_router("chat"), prefix="/chat", tags=["chat"])
+except Exception as e:
+    logger.error(f"Failed to load chat router: {e}")
+
+try:
+    app.include_router(get_router("ingest"), prefix="/ingest", tags=["ingest"])
+except Exception as e:
+    logger.warning(f"Failed to load ingest router: {e}")
+
+try:
+    app.include_router(get_router("pdf"), prefix="/pdf", tags=["pdf"])
+except Exception as e:
+    logger.warning(f"Failed to load pdf router: {e}")
 
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -347,26 +371,34 @@ async def root():
 
 @app.on_event("startup")
 async def startup_event():
-    """Application startup."""
-    if settings.is_development:
-        logger.info(f"Starting Vimeo RAG Chatbot Backend v1.0.0 in {settings.ENVIRONMENT} mode")
-        try:
-            allowed_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
-            logger.info(f"Allowed CORS origins: {allowed_origins}")
-        except Exception:
-            logger.info("Allowed CORS origins: * (development default)")
-    
-    cleanup_memory()
+    """Application startup - serverless-safe."""
+    try:
+        if settings.is_development:
+            logger.info(f"Starting Vimeo RAG Chatbot Backend v1.0.0 in {settings.ENVIRONMENT} mode")
+            try:
+                allowed_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
+                logger.info(f"Allowed CORS origins: {allowed_origins}")
+            except Exception:
+                logger.info("Allowed CORS origins: * (development default)")
+        
+        cleanup_memory()
+    except Exception as e:
+        # Don't fail startup on errors - serverless needs to start
+        logger.warning(f"Startup event warning: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Application shutdown."""
-    if settings.is_development:
-        logger.info("Shutting down Vimeo RAG Chatbot Backend")
-    
-    cleanup_memory()
-    _advanced_cache.clear()
-    _router_cache.clear()
+    """Application shutdown - serverless-safe."""
+    try:
+        if settings.is_development:
+            logger.info("Shutting down Vimeo RAG Chatbot Backend")
+        
+        cleanup_memory()
+        _advanced_cache.clear()
+        _router_cache.clear()
+    except Exception as e:
+        # Don't fail shutdown on errors
+        logger.warning(f"Shutdown event warning: {e}")
 
 if __name__ == "__main__":
     import uvicorn
