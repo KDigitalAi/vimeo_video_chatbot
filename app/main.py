@@ -140,13 +140,22 @@ async def general_exception_handler(request: Request, exc: Exception):
 # Health check - must work without dependencies
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "version": "1.0.0",
-        "environment": getattr(settings, 'ENVIRONMENT', 'production'),
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    """Health check endpoint - minimal, no dependencies."""
+    try:
+        return {
+            "status": "healthy",
+            "version": "1.0.0",
+            "environment": getattr(settings, 'ENVIRONMENT', 'production'),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        # Even if settings fail, return basic health
+        return {
+            "status": "degraded",
+            "version": "1.0.0",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 # Root endpoint
 @app.get("/")
@@ -240,3 +249,17 @@ if not _router_status.get('chat', False):
 
 # Export app for Vercel - required at module level
 # Vercel Python serverless functions expect 'app' to be exported
+# This is the handler that Vercel will use
+
+# Add diagnostic endpoint to help debug
+@app.get("/debug/imports")
+async def debug_imports():
+    """Debug endpoint to check what imports succeeded."""
+    if not settings.is_development:
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    return {
+        "router_status": _router_status,
+        "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
+        "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
+    }
