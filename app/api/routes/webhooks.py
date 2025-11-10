@@ -196,6 +196,36 @@ async def _process_video_async(video_id: str) -> None:
         logger.info("Continuing to process other videos despite error for video_id: %s", video_id)
 
 
+@router.get("/vimeo")
+async def vimeo_webhook_info():
+    """
+    Information endpoint for Vimeo webhook.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information and example
+    """
+    return {
+        "message": "Vimeo webhook endpoint",
+        "description": "To receive Vimeo webhooks, use POST /webhooks/vimeo with JSON payload",
+        "method": "POST",
+        "endpoint": "/webhooks/vimeo",
+        "content_type": "application/json",
+        "supported_events": ["video.ready", "video.transcoded", "video.uploaded"],
+        "example": {
+            "payload": {
+                "type": "video.ready",
+                "clip": {
+                    "uri": "/videos/1124405272"
+                }
+            }
+        },
+        "security": {
+            "note": "If VIMEO_WEBHOOK_SECRET is set, include it in X-Webhook-Secret header"
+        },
+        "note": "This endpoint uses POST method. Use GET only to view this information."
+    }
+
 @router.post("/vimeo")
 async def vimeo_webhook(
     request: Request,
@@ -287,6 +317,26 @@ async def webhook_health_check():
         }
     }
 
+
+@router.get("/test/{video_id}")
+async def manual_test_processing_info(video_id: str):
+    """
+    Information endpoint for manual test processing.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information
+    """
+    return {
+        "message": "Manual test processing endpoint",
+        "description": "To manually trigger video processing, use POST /webhooks/test/{video_id}",
+        "method": "POST",
+        "endpoint": f"/webhooks/test/{video_id}",
+        "parameters": {
+            "video_id": video_id
+        },
+        "note": "This endpoint uses POST method. Use GET only to view this information."
+    }
 
 @router.post("/test/{video_id}")
 async def manual_test_processing(

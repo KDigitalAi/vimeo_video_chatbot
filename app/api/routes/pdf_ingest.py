@@ -24,7 +24,34 @@ def _get_temp_file_path(pdf_id: str) -> str:
 
 router = APIRouter()
 
-@router.post("/pdf", response_model=PDFIngestResponse)
+@router.get("/upload")
+async def ingest_pdf_info():
+    """
+    Information endpoint for PDF upload.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information and example
+    """
+    return {
+        "message": "PDF upload endpoint",
+        "description": "To upload a PDF, use POST /pdf/upload with multipart/form-data",
+        "method": "POST",
+        "endpoint": "/pdf/upload",
+        "content_type": "multipart/form-data",
+        "example": {
+            "curl": "curl -X POST http://127.0.0.1:8000/pdf/upload -F 'file=@document.pdf' -F 'force_reprocess=false'"
+        },
+        "required_fields": {
+            "file": "PDF file to upload (multipart/form-data, required)"
+        },
+        "optional_fields": {
+            "force_reprocess": "Whether to reprocess if PDF already exists (boolean, default: false)"
+        },
+        "note": "This endpoint uses POST method. Use GET only to view this information."
+    }
+
+@router.post("/upload", response_model=PDFIngestResponse)
 async def ingest_pdf(
     file: UploadFile = File(...),
     force_reprocess: bool = Form(False)
@@ -157,7 +184,34 @@ async def ingest_pdf(
             except Exception as e:
                 logger.warning(f"Failed to remove temp file {temp_path}: {e}")
 
-@router.post("/pdf/batch")
+@router.get("/upload/batch")
+async def ingest_pdf_batch_info():
+    """
+    Information endpoint for batch PDF upload.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information and example
+    """
+    return {
+        "message": "Batch PDF upload endpoint",
+        "description": "To upload multiple PDFs, use POST /pdf/upload/batch with multipart/form-data",
+        "method": "POST",
+        "endpoint": "/pdf/upload/batch",
+        "content_type": "multipart/form-data",
+        "example": {
+            "curl": "curl -X POST http://127.0.0.1:8000/pdf/upload/batch -F 'files=@doc1.pdf' -F 'files=@doc2.pdf' -F 'force_reprocess=false'"
+        },
+        "required_fields": {
+            "files": "List of PDF files to upload (multipart/form-data, required)"
+        },
+        "optional_fields": {
+            "force_reprocess": "Whether to reprocess if PDFs already exist (boolean, default: false)"
+        },
+        "note": "This endpoint uses POST method. Use GET only to view this information."
+    }
+
+@router.post("/upload/batch")
 async def ingest_pdf_batch(
     files: list[UploadFile] = File(...),
     force_reprocess: bool = Form(False)
@@ -232,7 +286,7 @@ async def ingest_pdf_batch(
             detail=f"Batch processing failed: {str(e)}"
         )
 
-@router.get("/pdf/list")
+@router.get("/list")
 async def list_pdf_documents():
     """
     List all PDF documents that have been processed.
@@ -257,34 +311,7 @@ async def list_pdf_documents():
             detail=f"Failed to list PDF documents: {str(e)}"
         )
 
-@router.delete("/pdf/{pdf_id}")
-async def delete_pdf(pdf_id: str):
-    """
-    Delete a PDF and all its embeddings.
-    
-    Args:
-        pdf_id: Unique identifier for the PDF
-        
-    Returns:
-        Deletion result
-    """
-    try:
-        deleted_count = delete_pdf_embeddings(pdf_id)
-        
-        return {
-            "pdf_id": pdf_id,
-            "embeddings_deleted": deleted_count,
-            "status": "success"
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to delete PDF {pdf_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete PDF: {str(e)}"
-        )
-
-@router.get("/pdf/{pdf_id}/status")
+@router.get("/{pdf_id}/status")
 async def get_pdf_status(pdf_id: str):
     """
     Get the processing status of a PDF.
@@ -313,4 +340,75 @@ async def get_pdf_status(pdf_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get PDF status: {str(e)}"
+        )
+
+@router.get("/{pdf_id}")
+async def get_pdf_info(pdf_id: str):
+    """
+    Information endpoint for PDF deletion.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information and PDF status
+    """
+    try:
+        from app.services.pdf_store import get_pdf_embeddings_count
+        
+        embedding_count = get_pdf_embeddings_count(pdf_id)
+        exists = embedding_count > 0
+        
+        return {
+            "message": "PDF deletion endpoint",
+            "description": "To delete a PDF, use DELETE /pdf/{pdf_id}",
+            "method": "DELETE",
+            "endpoint": f"/pdf/{pdf_id}",
+            "parameters": {
+                "pdf_id": pdf_id
+            },
+            "current_status": {
+                "pdf_id": pdf_id,
+                "exists": exists,
+                "embedding_count": embedding_count,
+                "status": "processed" if exists else "not_found"
+            },
+            "note": "This endpoint uses DELETE method. Use GET to view this information and current PDF status."
+        }
+    except Exception as e:
+        return {
+            "message": "PDF deletion endpoint",
+            "description": "To delete a PDF, use DELETE /pdf/{pdf_id}",
+            "method": "DELETE",
+            "endpoint": f"/pdf/{pdf_id}",
+            "parameters": {
+                "pdf_id": pdf_id
+            },
+            "error": f"Could not retrieve PDF status: {str(e)}",
+            "note": "This endpoint uses DELETE method. Use GET to view this information."
+        }
+
+@router.delete("/{pdf_id}")
+async def delete_pdf(pdf_id: str):
+    """
+    Delete a PDF and all its embeddings.
+    
+    Args:
+        pdf_id: Unique identifier for the PDF
+        
+    Returns:
+        Deletion result
+    """
+    try:
+        deleted_count = delete_pdf_embeddings(pdf_id)
+        
+        return {
+            "pdf_id": pdf_id,
+            "embeddings_deleted": deleted_count,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to delete PDF {pdf_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete PDF: {str(e)}"
         )

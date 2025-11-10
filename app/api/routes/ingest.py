@@ -19,6 +19,96 @@ from app.config.security import get_current_user, HTTPAuthorizationCredentials
 router = APIRouter()
 
 
+@router.get("/video")
+@router.post("/video")
+async def video_ingest_info():
+    """
+    Information endpoint for video ingestion.
+    Returns usage instructions when video_id is not provided.
+    
+    Returns:
+        JSON with usage information and example
+    """
+    return {
+        "message": "Video ingestion endpoint",
+        "description": "To ingest a video, use POST /ingest/video/{video_id}",
+        "example": {
+            "method": "POST",
+            "url": "/ingest/video/1124405272",
+            "body": {
+                "force_transcription": False,
+                "chunk_size": 1000,
+                "chunk_overlap": 200
+            }
+        },
+        "required_parameters": {
+            "video_id": "Vimeo video ID (6-20 character numeric string) - must be included in the URL path"
+        },
+        "optional_parameters": {
+            "force_transcription": "Force Whisper transcription even if captions exist (default: false)",
+            "chunk_size": "Custom chunk size for text processing (default: 1000, range: 100-2000)",
+            "chunk_overlap": "Custom chunk overlap (default: 200, range: 0-500)"
+        },
+        "note": "The video_id must be included in the URL path. Example: POST /ingest/video/1124405272"
+    }
+
+
+@router.get("/video/{video_id}")
+async def ingest_video_info(video_id: str):
+    """
+    Information endpoint for video ingestion.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information and video status
+    """
+    try:
+        from app.services.vector_store_direct import check_duplicate_video
+        
+        exists = check_duplicate_video(video_id)
+        
+        return {
+            "message": "Video ingestion endpoint",
+            "description": "To ingest a video, use POST /ingest/video/{video_id} with JSON body",
+            "method": "POST",
+            "endpoint": f"/ingest/video/{video_id}",
+            "parameters": {
+                "video_id": video_id
+            },
+            "current_status": {
+                "video_id": video_id,
+                "exists": exists,
+                "status": "already_ingested" if exists else "not_ingested"
+            },
+            "example": {
+                "body": {
+                    "force_transcription": False,
+                    "chunk_size": 1000,
+                    "chunk_overlap": 200
+                }
+            },
+            "note": "This endpoint uses POST method. Use GET to view this information and current video status."
+        }
+    except Exception as e:
+        return {
+            "message": "Video ingestion endpoint",
+            "description": "To ingest a video, use POST /ingest/video/{video_id} with JSON body",
+            "method": "POST",
+            "endpoint": f"/ingest/video/{video_id}",
+            "parameters": {
+                "video_id": video_id
+            },
+            "error": f"Could not retrieve video status: {str(e)}",
+            "example": {
+                "body": {
+                    "force_transcription": False,
+                    "chunk_size": 1000,
+                    "chunk_overlap": 200
+                }
+            },
+            "note": "This endpoint uses POST method. Use GET to view this information."
+        }
+
 @router.post("/video/{video_id}", response_model=VideoIngestResponse)
 async def ingest_video(
     video_id: str, 

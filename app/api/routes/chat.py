@@ -356,6 +356,45 @@ Topic Context (may be empty): {topic_context}
             query
         )
 
+@router.get("/query")
+async def query_chat_info():
+    """
+    Information endpoint for chat query.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information and example
+    """
+    return {
+        "message": "Chat query endpoint",
+        "description": "To query the chatbot, use POST /chat/query with a JSON body",
+        "method": "POST",
+        "endpoint": "/chat/query",
+        "example": {
+            "request": {
+                "query": "What is Python?",
+                "user_id": "user123",
+                "conversation_id": "conv456",
+                "top_k": 5,
+                "include_sources": True
+            }
+        },
+        "required_fields": {
+            "request": {
+                "query": "Your question (string, required)",
+                "user_id": "User identifier (string, optional)"
+            }
+        },
+        "optional_fields": {
+            "request": {
+                "conversation_id": "Conversation session ID (string, optional)",
+                "top_k": "Number of results to retrieve (integer, default: 10)",
+                "include_sources": "Include source documents in response (boolean, default: true)"
+            }
+        },
+        "note": "This endpoint uses POST method. Use GET only to view this information."
+    }
+
 @router.post("/query", response_model=ChatResponse)
 async def query_chat(
     request_data: dict = Body(...),
@@ -994,6 +1033,27 @@ async def get_user_chat_sessions(user_id: str):
         )
 
 
+@router.get("/session/{user_id}/{session_id}")
+async def get_user_chat_session_info(user_id: str, session_id: str):
+    """
+    Information endpoint for chat session deletion.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information
+    """
+    return {
+        "message": "Chat session deletion endpoint",
+        "description": "To delete a chat session, use DELETE /chat/session/{user_id}/{session_id}",
+        "method": "DELETE",
+        "endpoint": f"/chat/session/{user_id}/{session_id}",
+        "parameters": {
+            "user_id": user_id,
+            "session_id": session_id
+        },
+        "note": "This endpoint uses DELETE method. Use GET only to view this information."
+    }
+
 @router.delete("/session/{user_id}/{session_id}")
 async def delete_user_chat_session(user_id: str, session_id: str):
     """
@@ -1022,6 +1082,26 @@ async def delete_user_chat_session(user_id: str, session_id: str):
             detail="Error deleting chat session"
         )
 
+
+@router.get("/clear-memory/{session_id}")
+async def clear_conversation_memory_info(session_id: str):
+    """
+    Information endpoint for clearing conversation memory.
+    Returns usage instructions when accessed via GET.
+    
+    Returns:
+        JSON with usage information
+    """
+    return {
+        "message": "Clear conversation memory endpoint",
+        "description": "To clear conversation memory, use POST /chat/clear-memory/{session_id}",
+        "method": "POST",
+        "endpoint": f"/chat/clear-memory/{session_id}",
+        "parameters": {
+            "session_id": session_id
+        },
+        "note": "This endpoint uses POST method. Use GET only to view this information."
+    }
 
 @router.post("/clear-memory/{session_id}")
 async def clear_conversation_memory(session_id: str):
