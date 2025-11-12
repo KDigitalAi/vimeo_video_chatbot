@@ -28,9 +28,19 @@ def download_vimeo_audio_with_ytdlp(video_id: str) -> str:
         logger.warning("Memory usage high before audio download")
         cleanup_memory()
     
-    # Create temp_audio directory if it doesn't exist
-    temp_dir = os.path.join(os.getcwd(), "temp_audio")
-    os.makedirs(temp_dir, exist_ok=True)
+    # Use /tmp directory for serverless environments (Vercel, AWS Lambda, etc.)
+    # This is the only writable directory in serverless environments
+    temp_dir = os.environ.get("TMPDIR", "/tmp")
+    temp_dir = os.path.join(temp_dir, "temp_audio")
+    try:
+        os.makedirs(temp_dir, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not create temp directory {temp_dir}: {e}, using /tmp/temp_audio")
+        temp_dir = "/tmp/temp_audio"
+        try:
+            os.makedirs(temp_dir, exist_ok=True)
+        except Exception:
+            pass  # If even /tmp fails, let the operation fail naturally
     
     try:
         # Try direct Vimeo URL (works for public videos)
