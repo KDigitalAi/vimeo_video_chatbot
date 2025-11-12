@@ -21,13 +21,28 @@ def get_project_root():
 project_root = get_project_root()
 env_path = project_root / ".env"
 
-# Try loading .env file
+# Try loading .env file - wrap in try/except to prevent crashes
 try:
     load_dotenv(dotenv_path=env_path)
 except Exception as e:
-    logging.warning(f"Could not load .env file: {e}")
+    # Use basic logging if dotenv fails
+    try:
+        logging.warning(f"Could not load .env file: {e}")
+    except Exception:
+        # If logging also fails, just pass silently
+        pass
 
-logger = logging.getLogger(__name__)
+# Initialize logger safely
+try:
+    logger = logging.getLogger(__name__)
+except Exception:
+    # Fallback if logging fails
+    import sys
+    class DummyLogger:
+        def warning(self, *args, **kwargs): pass
+        def error(self, *args, **kwargs): pass
+        def info(self, *args, **kwargs): pass
+    logger = DummyLogger()
 
 class Settings(BaseSettings):
     """Application settings with validation."""

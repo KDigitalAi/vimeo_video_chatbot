@@ -64,8 +64,17 @@ def get_logger():
 
     return _logger_instance
 
-# Use singleton logger
-logger = get_logger()
+# Use singleton logger - wrap in try/except to prevent import failures
+try:
+    logger = get_logger()
+except Exception:
+    # Fallback to basic logger if get_logger() fails (e.g., filesystem issues)
+    logger = logging.getLogger("vimeo_chatbot")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+        logger.addHandler(handler)
 
 def safe_get(d, key, default=None):
     return d.get(key, default) if isinstance(d, dict) else default
