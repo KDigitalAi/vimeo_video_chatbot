@@ -7,7 +7,7 @@ import uuid
 import gc
 from pathlib import Path
 from functools import lru_cache
-from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Request
 from app.services.pdf_processor import process_pdf_file, validate_pdf_file, get_pdf_metadata
 from app.services.pdf_store import store_pdf_embeddings, check_duplicate_pdf, delete_pdf_embeddings
 from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
@@ -19,13 +19,22 @@ _BATCH_CLEANUP_INTERVAL = 3
 
 @lru_cache(maxsize=64)
 def _get_temp_file_path(pdf_id: str) -> str:
-    """Generate temporary file path for PDF."""
-    return f"temp_{pdf_id}.pdf"
+    """Generate temporary file path for PDF - serverless-safe."""
+    # Use /tmp directory for serverless environments (Vercel, AWS Lambda, etc.)
+    # This is the only writable directory in serverless environments
+    temp_dir = os.environ.get("TMPDIR", "/tmp")
+    try:
+        # Ensure temp directory exists (safe to call multiple times)
+        os.makedirs(temp_dir, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not create temp directory {temp_dir}: {e}, using /tmp")
+        temp_dir = "/tmp"
+    return os.path.join(temp_dir, f"temp_{pdf_id}.pdf")
 
 router = APIRouter()
 
 @router.get("/upload")
-async def ingest_pdf_info():
+async def ingest_pdf_info(request: Request):
     """
     Information endpoint for PDF upload.
     Returns usage instructions when accessed via GET.
@@ -33,6 +42,7 @@ async def ingest_pdf_info():
     Returns:
         JSON with usage information and example
     """
+    base_url = str(request.base_url).rstrip('/')
     return {
         "message": "PDF upload endpoint",
         "description": "To upload a PDF, use POST /pdf/upload with multipart/form-data",
@@ -40,7 +50,7 @@ async def ingest_pdf_info():
         "endpoint": "/pdf/upload",
         "content_type": "multipart/form-data",
         "example": {
-            "curl": "curl -X POST http://127.0.0.1:8000/pdf/upload -F 'file=@document.pdf' -F 'force_reprocess=false'"
+            "curl": f"curl -X POST {base_url}/pdf/upload -F 'file=@document.pdf' -F 'force_reprocess=false'"
         },
         "required_fields": {
             "file": "PDF file to upload (multipart/form-data, required)"
@@ -185,7 +195,7 @@ async def ingest_pdf(
                 logger.warning(f"Failed to remove temp file {temp_path}: {e}")
 
 @router.get("/upload/batch")
-async def ingest_pdf_batch_info():
+async def ingest_pdf_batch_info(request: Request):
     """
     Information endpoint for batch PDF upload.
     Returns usage instructions when accessed via GET.
@@ -193,6 +203,7 @@ async def ingest_pdf_batch_info():
     Returns:
         JSON with usage information and example
     """
+    base_url = str(request.base_url).rstrip('/')
     return {
         "message": "Batch PDF upload endpoint",
         "description": "To upload multiple PDFs, use POST /pdf/upload/batch with multipart/form-data",
@@ -200,7 +211,7 @@ async def ingest_pdf_batch_info():
         "endpoint": "/pdf/upload/batch",
         "content_type": "multipart/form-data",
         "example": {
-            "curl": "curl -X POST http://127.0.0.1:8000/pdf/upload/batch -F 'files=@doc1.pdf' -F 'files=@doc2.pdf' -F 'force_reprocess=false'"
+            "curl": f"curl -X POST {base_url}/pdf/upload/batch -F 'files=@doc1.pdf' -F 'files=@doc2.pdf' -F 'force_reprocess=false'"
         },
         "required_fields": {
             "files": "List of PDF files to upload (multipart/form-data, required)"
