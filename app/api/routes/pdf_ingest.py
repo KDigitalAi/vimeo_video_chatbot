@@ -8,11 +8,51 @@ import gc
 from pathlib import Path
 from functools import lru_cache
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Request
-from app.services.pdf_processor import process_pdf_file, validate_pdf_file, get_pdf_metadata
-from app.services.pdf_store import store_pdf_embeddings, check_duplicate_pdf, delete_pdf_embeddings
-from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
-from app.models.schemas import PDFIngestResponse
-from app.config.settings import settings
+
+# Safe imports with error handling for serverless environments
+try:
+    from app.services.pdf_processor import process_pdf_file, validate_pdf_file, get_pdf_metadata
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import pdf_processor functions: {e}")
+    process_pdf_file = None
+    validate_pdf_file = None
+    get_pdf_metadata = None
+
+try:
+    from app.services.pdf_store import store_pdf_embeddings, check_duplicate_pdf, delete_pdf_embeddings
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import pdf_store functions: {e}")
+    store_pdf_embeddings = None
+    check_duplicate_pdf = None
+    delete_pdf_embeddings = None
+
+try:
+    from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+    def log_memory_usage(*args, **kwargs): pass
+    def cleanup_memory(*args, **kwargs): pass
+    def check_memory_threshold(*args, **kwargs): return True
+
+try:
+    from app.models.schemas import PDFIngestResponse
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import PDFIngestResponse: {e}")
+    PDFIngestResponse = None
+
+try:
+    from app.config.settings import settings
+except ImportError:
+    import os
+    class MinimalSettings:
+        ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+        is_development = False
+        is_production = True
+    settings = MinimalSettings()
 
 _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 _BATCH_CLEANUP_INTERVAL = 3
@@ -34,6 +74,7 @@ def _get_temp_file_path(pdf_id: str) -> str:
 router = APIRouter()
 
 @router.get("/upload")
+@router.get("/pdf")  # Alias for /upload to match documentation
 async def ingest_pdf_info(request: Request):
     """
     Information endpoint for PDF upload.
@@ -62,6 +103,7 @@ async def ingest_pdf_info(request: Request):
     }
 
 @router.post("/upload", response_model=PDFIngestResponse)
+@router.post("/pdf", response_model=PDFIngestResponse)  # Alias for /upload to match documentation
 async def ingest_pdf(
     file: UploadFile = File(...),
     force_reprocess: bool = Form(False)

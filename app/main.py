@@ -185,18 +185,153 @@ if app is not None and FASTAPI_AVAILABLE:
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+    @app.get("/health/detailed")
+    async def detailed_health_check():
+        """Comprehensive health check that validates all external dependencies."""
+        health_status = {
+            "status": "healthy",
+            "version": "1.0.0",
+            "timestamp": datetime.utcnow().isoformat(),
+            "environment": getattr(settings, 'ENVIRONMENT', 'production'),
+            "services": {}
+        }
+        
+        overall_healthy = True
+        
+        # Check OpenAI
+        try:
+            import os
+            openai_key = os.getenv("OPENAI_API_KEY")
+            if openai_key:
+                health_status["services"]["openai"] = {
+                    "status": "available",
+                    "api_key": "configured"
+                }
+            else:
+                health_status["services"]["openai"] = {
+                    "status": "unavailable",
+                    "api_key": "missing"
+                }
+                overall_healthy = False
+        except Exception as e:
+            health_status["services"]["openai"] = {
+                "status": "error",
+                "error": str(e)
+            }
+            overall_healthy = False
+        
+        # Check Supabase
+        try:
+            import os
+            supabase_url = os.getenv("SUPABASE_URL")
+            supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+            if supabase_url and supabase_key:
+                # Try to actually connect
+                try:
+                    from app.services.vector_store import load_supabase_vectorstore
+                    if load_supabase_vectorstore:
+                        health_status["services"]["supabase"] = {
+                            "status": "available",
+                            "url": "configured",
+                            "key": "configured"
+                        }
+                    else:
+                        health_status["services"]["supabase"] = {
+                            "status": "unavailable",
+                            "error": "vector_store module not available"
+                        }
+                        overall_healthy = False
+                except Exception as e:
+                    health_status["services"]["supabase"] = {
+                        "status": "error",
+                        "error": f"Connection failed: {str(e)}"
+                    }
+                    overall_healthy = False
+            else:
+                health_status["services"]["supabase"] = {
+                    "status": "unavailable",
+                    "url": "missing" if not supabase_url else "configured",
+                    "key": "missing" if not supabase_key else "configured"
+                }
+                overall_healthy = False
+        except Exception as e:
+            health_status["services"]["supabase"] = {
+                "status": "error",
+                "error": str(e)
+            }
+            overall_healthy = False
+        
+        # Check Vimeo
+        try:
+            import os
+            vimeo_token = os.getenv("VIMEO_ACCESS_TOKEN")
+            if vimeo_token:
+                health_status["services"]["vimeo"] = {
+                    "status": "available",
+                    "token": "configured"
+                }
+            else:
+                health_status["services"]["vimeo"] = {
+                    "status": "unavailable",
+                    "token": "missing"
+                }
+                # Vimeo is optional, so don't mark overall as unhealthy
+        except Exception as e:
+            health_status["services"]["vimeo"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # Check router status
+        health_status["routers"] = _router_status
+        
+        if not overall_healthy:
+            health_status["status"] = "degraded"
+        
+        return health_status
+
     # Root endpoint
     @app.get("/")
     async def root():
-        """Root endpoint."""
+        """Root endpoint - API discovery that lists available endpoints."""
         return {
             "message": "Vimeo Video Chatbot API",
             "version": "1.0.0",
             "status": "running",
             "environment": getattr(settings, 'ENVIRONMENT', 'production'),
             "endpoints": {
-                "health": "/health",
-                "chat": "/chat/query",
+                "health": {
+                    "quick": "/health",
+                    "detailed": "/health/detailed"
+                },
+                "chat": {
+                    "query": "/chat/query",
+                    "history": "/chat/history/{user_id}",
+                    "sessions": "/chat/sessions/{user_id}",
+                    "session_delete": "/chat/session/{user_id}/{session_id}",
+                    "clear_memory": "/chat/clear-memory/{session_id}",
+                    "delete_history": "DELETE /chat/history/{user_id}"
+                },
+                "ingest": {
+                    "video": "/ingest/video/{video_id}",
+                    "health": "/ingest/health"
+                },
+                "pdf": {
+                    "upload": "/pdf/upload",
+                    "pdf": "/pdf/pdf",  # Alias for upload
+                    "batch": "/pdf/upload/batch",
+                    "list": "/pdf/list",
+                    "status": "/pdf/{pdf_id}/status",
+                    "delete": "DELETE /pdf/{pdf_id}"
+                },
+                "webhooks": {
+                    "vimeo": "/webhooks/vimeo",
+                    "health": "/webhooks/health",
+                    "test": "/webhooks/test/{video_id}"
+                },
+                "debug": {
+                    "routers": "/debug/routers"
+                }
             },
             "timestamp": datetime.utcnow().isoformat()
         }

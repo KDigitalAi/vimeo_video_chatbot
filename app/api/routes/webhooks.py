@@ -3,16 +3,55 @@ import os
 import asyncio
 import gc
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status, Request
-from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
-from app.services.vimeo_loader import get_video_metadata
-from app.services.transcript_manager import get_transcript_segments_from_vimeo
-from app.services.whisper_transcriber import transcribe_vimeo_audio
-from app.services.text_processor import make_chunks_with_metadata
-from app.services.vector_store_direct import (
-    check_duplicate_video,
-    store_embeddings_directly,
-)
 
+# Safe imports with error handling for serverless environments
+try:
+    from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+    def log_memory_usage(*args, **kwargs): pass
+    def cleanup_memory(*args, **kwargs): pass
+    def check_memory_threshold(*args, **kwargs): return True
+
+try:
+    from app.services.vimeo_loader import get_video_metadata
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import get_video_metadata: {e}")
+    get_video_metadata = None
+
+try:
+    from app.services.transcript_manager import get_transcript_segments_from_vimeo
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import get_transcript_segments_from_vimeo: {e}")
+    get_transcript_segments_from_vimeo = None
+
+try:
+    from app.services.whisper_transcriber import transcribe_vimeo_audio
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import transcribe_vimeo_audio: {e}")
+    transcribe_vimeo_audio = None
+
+try:
+    from app.services.text_processor import make_chunks_with_metadata
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import make_chunks_with_metadata: {e}")
+    make_chunks_with_metadata = None
+
+try:
+    from app.services.vector_store_direct import (
+        check_duplicate_video,
+        store_embeddings_directly,
+    )
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import vector_store_direct functions: {e}")
+    check_duplicate_video = None
+    store_embeddings_directly = None
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
