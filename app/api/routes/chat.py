@@ -72,13 +72,27 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
+ChatRequest = None
+ChatResponse = None
+
 try:
     from app.models.schemas import ChatRequest, ChatResponse
+    if ChatRequest is None or ChatResponse is None:
+        _import_errors['schemas'] = "ChatRequest or ChatResponse is None after import"
 except ImportError as e:
     import logging
-    logging.error(f"Failed to import schemas: {e}")
-    ChatRequest = None
-    ChatResponse = None
+    import traceback
+    error_msg = f"ImportError: {str(e)}"
+    _import_errors['schemas'] = error_msg
+    logging.error(f"Failed to import schemas: {error_msg}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
+except Exception as e:
+    import logging
+    import traceback
+    error_msg = f"Unexpected error importing schemas: {str(e)}"
+    _import_errors['schemas'] = error_msg
+    logging.error(f"Failed to import schemas: {error_msg}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
 
 try:
     from app.config.settings import settings

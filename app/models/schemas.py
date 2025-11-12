@@ -5,7 +5,25 @@ Provides comprehensive validation for all API endpoints.
 import re
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
-from app.config.security import sanitize_input, validate_video_id, validate_query_text
+
+# Safe import of security functions with fallbacks
+try:
+    from app.config.security import sanitize_input, validate_video_id, validate_query_text
+except ImportError:
+    # Fallback implementations if security module fails to import
+    def sanitize_input(text: str) -> str:
+        """Fallback sanitize function."""
+        if not text:
+            return ""
+        return ' '.join(text.split())
+    
+    def validate_video_id(video_id: str) -> bool:
+        """Fallback video ID validation."""
+        return bool(video_id and re.match(r'^\d+$', str(video_id)))
+    
+    def validate_query_text(text: str) -> bool:
+        """Fallback query text validation."""
+        return bool(text and len(text.strip()) > 0)
 
 class BaseRequestModel(BaseModel):
     """Base request model with common validation."""
