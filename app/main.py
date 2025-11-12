@@ -177,18 +177,39 @@ async def root():
 def _safe_include_router(router_name: str, router_module: str, prefix: str = None, tags: list = None):
     """Safely include a router with error handling."""
     try:
+        logger.info(f"Attempting to load {router_name} router from {router_module}")
         module = __import__(router_module, fromlist=['router'])
+        logger.info(f"Successfully imported module {router_module}")
+        
+        if not hasattr(module, 'router'):
+            logger.error(f"Module {router_module} does not have 'router' attribute")
+            return False
+            
         router = getattr(module, 'router')
+        logger.info(f"Found router object: {type(router)}")
+        
         if prefix:
             app.include_router(router, prefix=prefix, tags=tags or [])
+            logger.info(f"Successfully registered {router_name} router with prefix {prefix}")
         else:
             app.include_router(router, tags=tags or [])
-        logger.info(f"Successfully loaded {router_name} router")
+            logger.info(f"Successfully registered {router_name} router without prefix")
+        
         return True
-    except Exception as e:
-        logger.error(f"Failed to load {router_name} router: {e}")
+    except ImportError as e:
+        logger.error(f"ImportError loading {router_name} router from {router_module}: {e}")
         import traceback
-        logger.error(traceback.format_exc())
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        return False
+    except AttributeError as e:
+        logger.error(f"AttributeError loading {router_name} router: {e}")
+        import traceback
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error loading {router_name} router: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
         return False
 
 # Load routers - each one independently so failures don't cascade
@@ -251,15 +272,33 @@ if not _router_status.get('chat', False):
 # Vercel Python serverless functions expect 'app' to be exported
 # This is the handler that Vercel will use
 
-# Add diagnostic endpoint to help debug
-@app.get("/debug/imports")
-async def debug_imports():
-    """Debug endpoint to check what imports succeeded."""
-    if not settings.is_development:
-        raise HTTPException(status_code=404, detail="Not found")
-    
-    return {
-        "router_status": _router_status,
-        "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
-        "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
-    }
+# Add diagnostic endpoint to help debug router loading
+@app.get("/debug/routers")
+async def debug_routers():
+    """Debug endpoint to check router loading status - works in production."""
+    try:
+        # Get all registered routes
+        routes_info = []
+        for route in app.routes:
+            route_info = {
+                "path": route.path,
+                "name": getattr(route, 'name', 'unknown')
+            }
+            # Get methods if available
+            if hasattr(route, 'methods'):
+                route_info["methods"] = list(route.methods)
+            routes_info.append(route_info)
+        
+        return {
+            "router_status": _router_status,
+            "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
+            "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
+            "available_routes": routes_info,
+            "total_routes": len(routes_info)
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "router_status": _router_status,
+            "environment": getattr(settings, 'ENVIRONMENT', 'unknown')
+        }

@@ -4,18 +4,63 @@ Chat router with enhanced security and validation.
 import time
 import uuid
 from fastapi import APIRouter, HTTPException, status, Body
-from app.services.vector_store import load_supabase_vectorstore
-from app.services.retriever_chain import get_conversational_chain
-from app.services.chat_history_manager import (
-    store_chat_interaction, 
-    get_chat_history, 
-    get_chat_sessions,
-    delete_chat_session,
-    clear_all_chat_history
-)
-from app.utils.logger import logger
-from app.models.schemas import ChatRequest, ChatResponse
-from app.config.settings import settings
+
+# Safe imports with error handling for serverless environments
+try:
+    from app.services.vector_store import load_supabase_vectorstore
+except ImportError as e:
+    # Log error but allow router to be created
+    import logging
+    logging.error(f"Failed to import load_supabase_vectorstore: {e}")
+    load_supabase_vectorstore = None
+
+try:
+    from app.services.retriever_chain import get_conversational_chain
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import get_conversational_chain: {e}")
+    get_conversational_chain = None
+
+try:
+    from app.services.chat_history_manager import (
+        store_chat_interaction, 
+        get_chat_history, 
+        get_chat_sessions,
+        delete_chat_session,
+        clear_all_chat_history
+    )
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import chat_history_manager functions: {e}")
+    store_chat_interaction = None
+    get_chat_history = None
+    get_chat_sessions = None
+    delete_chat_session = None
+    clear_all_chat_history = None
+
+try:
+    from app.utils.logger import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+
+try:
+    from app.models.schemas import ChatRequest, ChatResponse
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import schemas: {e}")
+    ChatRequest = None
+    ChatResponse = None
+
+try:
+    from app.config.settings import settings
+except ImportError:
+    import os
+    class MinimalSettings:
+        ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+        is_development = False
+        is_production = True
+    settings = MinimalSettings()
 
 router = APIRouter()
 
