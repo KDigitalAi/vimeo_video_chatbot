@@ -9,7 +9,15 @@ env/
 # Data and uploaded assets
 uploads/
 data/
-models/
+# Note: Do NOT exclude app/models/ - that's a Python package!
+# Only exclude ML model files (if any in root)
+*.pt
+*.bin
+*.ckpt
+*.onnx
+*.h5
+*.pkl
+*.joblib
 
 # Node/build outputs
 node_modules/
@@ -28,11 +36,6 @@ docs/
 *.mkv
 *.avi
 *.mov
-*.pt
-*.bin
-*.ckpt
-*.onnx
-*.h5
 
 # Python caches
 __pycache__/
