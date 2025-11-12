@@ -1,6 +1,15 @@
 from typing import Optional, Any
-from app.config.settings import settings
-from app.services.vector_store_direct import get_supabase_direct
+
+# Lazy import to prevent circular dependencies and import-time failures
+def _get_settings():
+    """Lazy import of settings to prevent circular dependencies."""
+    from app.config.settings import settings
+    return settings
+
+def _get_supabase_direct():
+    """Lazy import of get_supabase_direct to prevent circular dependencies."""
+    from app.services.vector_store_direct import get_supabase_direct
+    return get_supabase_direct
 
 # Use the direct postgrest client as the main Supabase client
 # This avoids the compatibility issues with the main Supabase library
@@ -12,6 +21,10 @@ def get_supabase():
     
     if _supabase_client is None:
         try:
+            # Use lazy imports to prevent circular dependencies
+            settings = _get_settings()
+            get_supabase_direct = _get_supabase_direct()
+            
             url_valid = settings.SUPABASE_URL and not settings.SUPABASE_URL.startswith("your_")
             key_valid = settings.SUPABASE_SERVICE_KEY and not settings.SUPABASE_SERVICE_KEY.startswith("your_")
             
@@ -29,6 +42,8 @@ def get_supabase():
         except Exception as e:
             from app.utils.logger import logger
             logger.error(f"Failed to create Supabase client: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
     return _supabase_client

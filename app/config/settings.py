@@ -95,15 +95,54 @@ class Settings(BaseSettings):
     )
 
 # Global settings instance - serverless-safe initialization
+# Multiple fallback layers to prevent crashes
 try:
-    settings = Settings()
+    # First try: Normal initialization
+    env_value = os.getenv("ENVIRONMENT", "production")
+    # Ensure ENVIRONMENT is valid before creating Settings
+    if env_value not in {'development', 'staging', 'production'}:
+        logger.warning(f"Invalid ENVIRONMENT value '{env_value}', defaulting to 'production'")
+        env_value = "production"
+    
+    settings = Settings(ENVIRONMENT=env_value)
     if settings.is_development:
         logger.info(f"Configuration loaded for {settings.ENVIRONMENT} environment")
+except ValueError as ve:
+    # Handle validation errors (e.g., invalid ENVIRONMENT)
+    logger.error(f"Settings validation error: {ve}")
+    try:
+        settings = Settings(ENVIRONMENT="production", DEBUG=False)
+    except Exception:
+        # Last resort: create minimal settings object
+        class MinimalSettings:
+            ENVIRONMENT = "production"
+            is_development = False
+            is_production = True
+            DEBUG = False
+            ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
+            OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+            SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+            SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+            VIMEO_ACCESS_TOKEN = os.getenv("VIMEO_ACCESS_TOKEN", "")
+        settings = MinimalSettings()
 except Exception as e:
     logger.error(f"Failed to load configuration: {e}")
+    import traceback
+    logger.error(f"Traceback: {traceback.format_exc()}")
     # Create minimal settings for serverless to avoid import failures
-    settings = Settings(
-        ENVIRONMENT=os.getenv("ENVIRONMENT", "production"),
-        DEBUG=False
-    )
+    try:
+        settings = Settings(ENVIRONMENT="production", DEBUG=False)
+    except Exception:
+        # Last resort: create minimal settings object
+        class MinimalSettings:
+            ENVIRONMENT = "production"
+            is_development = False
+            is_production = True
+            DEBUG = False
+            ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
+            OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+            SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+            SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+            VIMEO_ACCESS_TOKEN = os.getenv("VIMEO_ACCESS_TOKEN", "")
+        settings = MinimalSettings()
 

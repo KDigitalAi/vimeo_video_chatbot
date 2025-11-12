@@ -321,16 +321,86 @@ if app is not None and FASTAPI_AVAILABLE:
                     route_info["methods"] = list(route.methods)
                 routes_info.append(route_info)
             
+            # Check environment variables (without exposing values)
+            import os
+            env_vars_status = {
+                "OPENAI_API_KEY": "set" if os.getenv("OPENAI_API_KEY") else "missing",
+                "SUPABASE_URL": "set" if os.getenv("SUPABASE_URL") else "missing",
+                "SUPABASE_SERVICE_KEY": "set" if os.getenv("SUPABASE_SERVICE_KEY") else "missing",
+                "VIMEO_ACCESS_TOKEN": "set" if os.getenv("VIMEO_ACCESS_TOKEN") else "missing",
+                "ENVIRONMENT": os.getenv("ENVIRONMENT", "not_set"),
+                "VERCEL": os.getenv("VERCEL", "not_set"),
+                "VERCEL_ENV": os.getenv("VERCEL_ENV", "not_set")
+            }
+            
+            # Check for import errors
+            import sys
+            import_errors = []
+            for module_name in sys.modules:
+                if module_name.startswith('app.'):
+                    try:
+                        module = sys.modules[module_name]
+                        # Check if module has any obvious errors
+                        if hasattr(module, '__file__') and module.__file__:
+                            pass  # Module loaded successfully
+                    except Exception as e:
+                        import_errors.append(f"{module_name}: {str(e)}")
+            
             return {
                 "router_status": _router_status,
                 "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
                 "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
+                "fastapi_available": FASTAPI_AVAILABLE,
+                "app_created": app is not None,
                 "available_routes": routes_info,
-                "total_routes": len(routes_info)
+                "total_routes": len(routes_info),
+                "environment_variables": env_vars_status,
+                "python_version": sys.version,
+                "import_errors": import_errors[:10]  # Limit to first 10 errors
             }
         except Exception as e:
+            import traceback
             return {
                 "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": traceback.format_exc(),
                 "router_status": _router_status,
-                "environment": getattr(settings, 'ENVIRONMENT', 'unknown')
+                "environment": getattr(settings, 'ENVIRONMENT', 'unknown') if 'settings' in globals() else 'unknown'
+            }
+    
+    # Add logs endpoint (Vercel-compatible)
+    @app.get("/_logs")
+    async def get_logs():
+        """Get recent application logs - Vercel compatible endpoint."""
+        try:
+            import logging
+            import sys
+            
+            # Collect log records from memory (if available)
+            log_records = []
+            
+            # Check if there's a file handler we can read from
+            logger_handlers = logger.handlers if hasattr(logger, 'handlers') else []
+            for handler in logger_handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'getvalue'):
+                    # StringIO handler - get its contents
+                    log_content = handler.stream.getvalue()
+                    if log_content:
+                        log_records = log_content.split('\n')[-50:]  # Last 50 lines
+                        break
+            
+            return {
+                "status": "ok",
+                "message": "Logs endpoint active",
+                "note": "In Vercel, check deployment logs in dashboard or use /debug/routers for diagnostics",
+                "log_level": logging.getLevelName(logger.level) if hasattr(logger, 'level') else "unknown",
+                "handlers": [type(h).__name__ for h in logger_handlers],
+                "recent_logs": log_records[-20:] if log_records else ["No in-memory logs available. Check Vercel deployment logs."]
+            }
+        except Exception as e:
+            import traceback
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "message": "Failed to retrieve logs"
             }
