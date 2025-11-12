@@ -40,8 +40,7 @@ pydub==0.25.1
 yt-dlp==2025.10.22
 
 # HTTP and networking
-httpx==0.25.0
-httpcore==0.18.0
+# Note: httpx and httpcore versions are resolved by dependent packages to avoid conflicts
 requests==2.32.3
 aiohttp==3.13.2
 anyio==4.11.0
