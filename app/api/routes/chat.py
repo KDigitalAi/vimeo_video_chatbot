@@ -167,6 +167,9 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
 
 def _get_or_create_conversation_chain(session_id: str, vector_store):
     """Get or create a conversation chain for the given session."""
+    if get_conversational_chain is None:
+        raise RuntimeError("get_conversational_chain is not available - import failed")
+    
     if session_id not in _conversation_chains:
         _conversation_chains[session_id] = get_conversational_chain(
             vector_store=vector_store,
@@ -440,12 +443,27 @@ async def query_chat_info():
         "note": "This endpoint uses POST method. Use GET only to view this information."
     }
 
-@router.post("/query", response_model=ChatResponse)
-async def query_chat(
-    request_data: dict = Body(...),
-):
+# Define endpoint - conditionally add response_model to prevent crashes
+# FastAPI doesn't accept None for response_model, so we use a wrapper
+def _create_query_endpoint():
+    """Create the query endpoint with proper response_model handling."""
+    if ChatResponse is not None:
+        @router.post("/query", response_model=ChatResponse)
+        async def query_chat_impl(request_data: dict = Body(...)):
+            return await _query_chat_handler(request_data)
+        return query_chat_impl
+    else:
+        @router.post("/query")
+        async def query_chat_impl(request_data: dict = Body(...)):
+            return await _query_chat_handler(request_data)
+        return query_chat_impl
+
+# Register the endpoint
+_create_query_endpoint()
+
+async def _query_chat_handler(request_data: dict):
     """
-    Process chat query with enhanced security and validation.
+    Internal handler for chat query - separated to allow conditional decorator.
     
     Args:
         request_data: Raw request data from client
@@ -457,6 +475,28 @@ async def query_chat(
         HTTPException: For various error conditions
     """
     start_time = time.time()
+    
+    # Check if critical imports are available
+    if ChatRequest is None or ChatResponse is None:
+        logger.error("ChatRequest or ChatResponse is None - schemas failed to import")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chat service is not properly configured. Please check server logs."
+        )
+    
+    if load_supabase_vectorstore is None:
+        logger.error("load_supabase_vectorstore is None - vector_store failed to import")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vector store service is not available. Please check server configuration."
+        )
+    
+    if get_conversational_chain is None:
+        logger.error("get_conversational_chain is None - retriever_chain failed to import")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Conversational chain service is not available. Please check server configuration."
+        )
     
     try:
         # Extract and validate the nested request
@@ -536,12 +576,19 @@ async def query_chat(
         try:
             global _global_vector_store
             if _global_vector_store is None:
+                if load_supabase_vectorstore is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Vector store service is not available - import failed"
+                    )
                 if settings.is_development:
                     logger.info("Loading vector store...")
                 _global_vector_store = load_supabase_vectorstore()
                 if settings.is_development:
                     logger.info("Vector store loaded successfully")
             vs = _global_vector_store
+        except HTTPException:
+            raise
         except Exception as e:
             logger.exception("Failed to load vectorstore: %s", str(e))
             raise HTTPException(
