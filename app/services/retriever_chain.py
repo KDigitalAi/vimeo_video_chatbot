@@ -2,8 +2,29 @@
 Retriever chain for conversational RAG.
 """
 from functools import lru_cache
-from app.config.settings import settings
-from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+
+# Lazy import of settings to prevent import-time failures
+def _get_settings():
+    """Lazy import of settings."""
+    try:
+        from app.config.settings import settings
+        return settings
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to import settings: {e}")
+        raise
+
+# Lazy import of logger
+def _get_logger():
+    """Lazy import of logger."""
+    try:
+        from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+        return logger, log_memory_usage, cleanup_memory, check_memory_threshold
+    except Exception:
+        import logging
+        logger = logging.getLogger(__name__)
+        def noop(*args, **kwargs): pass
+        return logger, noop, noop, lambda *args: True
 
 # Lazy imports to reduce memory footprint
 def _get_langchain_imports():
@@ -22,6 +43,10 @@ def get_conversational_chain(vector_store, temperature: float = 0.0, k: int = 3)
     Create conversational chain for a specific session.
     Each call creates a new chain with its own memory to ensure session isolation.
     """
+    # Lazy load dependencies
+    settings = _get_settings()
+    logger, log_memory_usage, cleanup_memory, check_memory_threshold = _get_logger()
+    
     # Check memory before processing
     if not check_memory_threshold():
         logger.warning("Memory usage high before creating conversational chain")

@@ -6,20 +6,48 @@ import uuid
 from fastapi import APIRouter, HTTPException, status, Body
 
 # Safe imports with error handling for serverless environments
+# Try importing with detailed error capture
+load_supabase_vectorstore = None
+get_conversational_chain = None
+_import_errors = {}
+
 try:
     from app.services.vector_store import load_supabase_vectorstore
+    if load_supabase_vectorstore is None:
+        _import_errors['vector_store'] = "load_supabase_vectorstore function is None"
 except ImportError as e:
-    # Log error but allow router to be created
     import logging
-    logging.error(f"Failed to import load_supabase_vectorstore: {e}")
-    load_supabase_vectorstore = None
+    import traceback
+    error_msg = f"ImportError: {str(e)}"
+    _import_errors['vector_store'] = error_msg
+    logging.error(f"Failed to import load_supabase_vectorstore: {error_msg}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
+except Exception as e:
+    import logging
+    import traceback
+    error_msg = f"Unexpected error importing vector_store: {str(e)}"
+    _import_errors['vector_store'] = error_msg
+    logging.error(f"Failed to import load_supabase_vectorstore: {error_msg}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
 
 try:
     from app.services.retriever_chain import get_conversational_chain
+    if get_conversational_chain is None:
+        _import_errors['retriever_chain'] = "get_conversational_chain function is None"
 except ImportError as e:
     import logging
-    logging.error(f"Failed to import get_conversational_chain: {e}")
-    get_conversational_chain = None
+    import traceback
+    error_msg = f"ImportError: {str(e)}"
+    _import_errors['retriever_chain'] = error_msg
+    logging.error(f"Failed to import get_conversational_chain: {error_msg}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
+except Exception as e:
+    import logging
+    import traceback
+    error_msg = f"Unexpected error importing retriever_chain: {str(e)}"
+    _import_errors['retriever_chain'] = error_msg
+    logging.error(f"Failed to import get_conversational_chain: {error_msg}")
+    logging.error(f"Traceback: {traceback.format_exc()}")
 
 try:
     from app.services.chat_history_manager import (
@@ -476,26 +504,60 @@ async def _query_chat_handler(request_data: dict):
     """
     start_time = time.time()
     
-    # Check if critical imports are available
+    # Check if critical imports are available with detailed diagnostics
+    missing_services = []
+    
     if ChatRequest is None or ChatResponse is None:
         logger.error("ChatRequest or ChatResponse is None - schemas failed to import")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Chat service is not properly configured. Please check server logs."
-        )
+        missing_services.append("schemas")
     
     if load_supabase_vectorstore is None:
         logger.error("load_supabase_vectorstore is None - vector_store failed to import")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Vector store service is not available. Please check server configuration."
-        )
+        missing_services.append("vector_store")
     
     if get_conversational_chain is None:
         logger.error("get_conversational_chain is None - retriever_chain failed to import")
+        missing_services.append("retriever_chain")
+    
+    # Check environment variables
+    import os
+    missing_env_vars = []
+    if not os.getenv("OPENAI_API_KEY"):
+        missing_env_vars.append("OPENAI_API_KEY")
+    if not os.getenv("SUPABASE_URL"):
+        missing_env_vars.append("SUPABASE_URL")
+    if not os.getenv("SUPABASE_SERVICE_KEY"):
+        missing_env_vars.append("SUPABASE_SERVICE_KEY")
+    
+    if missing_services or missing_env_vars:
+        error_detail = {
+            "error": "service_unavailable",
+            "message": "Chat service is not properly configured. Please check server logs.",
+            "missing_services": missing_services,
+            "missing_environment_variables": missing_env_vars,
+            "import_errors": _import_errors,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.%f")
+        }
+        
+        # Provide helpful guidance
+        guidance_parts = []
+        if missing_env_vars:
+            guidance_parts.append(f"Missing required environment variables: {', '.join(missing_env_vars)}. Please configure these in your .env file or Vercel environment variables.")
+        if missing_services:
+            guidance_parts.append(f"Failed to import services: {', '.join(missing_services)}.")
+            # Add specific import error details
+            for service in missing_services:
+                if service in _import_errors:
+                    guidance_parts.append(f"  - {service}: {_import_errors[service]}")
+        
+        if not guidance_parts:
+            guidance_parts.append("This may indicate missing dependencies or configuration issues. Check Vercel deployment logs for details.")
+        
+        error_detail["guidance"] = " ".join(guidance_parts)
+        
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Conversational chain service is not available. Please check server configuration."
+            detail=error_detail
         )
     
     try:

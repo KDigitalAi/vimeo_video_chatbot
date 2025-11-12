@@ -9,9 +9,15 @@ from app.utils.logger import logger
 
 
 def _get_supabase():
-    from app.database.supabase import get_supabase
-
-    return get_supabase()
+    """Lazy import of Supabase client with error handling."""
+    try:
+        from app.database.supabase import get_supabase
+        return get_supabase()
+    except Exception as e:
+        logger.error(f"Failed to get Supabase client: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 
 def _cosine_similarity(a: list, b: list) -> float:
@@ -58,7 +64,13 @@ class _SimpleDocument:
 
 class SupabaseVectorStore:
     def __init__(self):
-        self._supabase = _get_supabase()
+        try:
+            self._supabase = _get_supabase()
+        except Exception as e:
+            logger.error(f"Failed to initialize SupabaseVectorStore: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise ValueError(f"Cannot initialize vector store: {str(e)}") from e
 
     def similarity_search_by_vector_with_relevance_scores(self, query_embedding: list, k: int = 5) -> List[Tuple[_SimpleDocument, float]]:
         results: List[Tuple[_SimpleDocument, float]] = []

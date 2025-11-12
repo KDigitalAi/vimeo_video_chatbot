@@ -188,19 +188,20 @@ if app is not None and FASTAPI_AVAILABLE:
     @app.get("/health/detailed")
     async def detailed_health_check():
         """Comprehensive health check that validates all external dependencies."""
+        import os
         health_status = {
             "status": "healthy",
             "version": "1.0.0",
             "timestamp": datetime.utcnow().isoformat(),
             "environment": getattr(settings, 'ENVIRONMENT', 'production'),
-            "services": {}
+            "services": {},
+            "chat_service": {}
         }
         
         overall_healthy = True
         
         # Check OpenAI
         try:
-            import os
             openai_key = os.getenv("OPENAI_API_KEY")
             if openai_key:
                 health_status["services"]["openai"] = {
@@ -222,7 +223,6 @@ if app is not None and FASTAPI_AVAILABLE:
         
         # Check Supabase
         try:
-            import os
             supabase_url = os.getenv("SUPABASE_URL")
             supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
             if supabase_url and supabase_key:
@@ -263,7 +263,6 @@ if app is not None and FASTAPI_AVAILABLE:
         
         # Check Vimeo
         try:
-            import os
             vimeo_token = os.getenv("VIMEO_ACCESS_TOKEN")
             if vimeo_token:
                 health_status["services"]["vimeo"] = {
@@ -281,6 +280,51 @@ if app is not None and FASTAPI_AVAILABLE:
                 "status": "error",
                 "error": str(e)
             }
+        
+        # Check Chat Service Components
+        try:
+            from app.models.schemas import ChatRequest, ChatResponse
+            health_status["chat_service"]["schemas"] = {
+                "status": "available",
+                "ChatRequest": ChatRequest is not None,
+                "ChatResponse": ChatResponse is not None
+            }
+        except Exception as e:
+            health_status["chat_service"]["schemas"] = {
+                "status": "unavailable",
+                "error": str(e)
+            }
+            overall_healthy = False
+        
+        try:
+            from app.services.vector_store import load_supabase_vectorstore
+            health_status["chat_service"]["vector_store"] = {
+                "status": "available" if load_supabase_vectorstore else "unavailable",
+                "function": "loaded" if load_supabase_vectorstore else "not_loaded"
+            }
+            if not load_supabase_vectorstore:
+                overall_healthy = False
+        except Exception as e:
+            health_status["chat_service"]["vector_store"] = {
+                "status": "unavailable",
+                "error": str(e)
+            }
+            overall_healthy = False
+        
+        try:
+            from app.services.retriever_chain import get_conversational_chain
+            health_status["chat_service"]["retriever_chain"] = {
+                "status": "available" if get_conversational_chain else "unavailable",
+                "function": "loaded" if get_conversational_chain else "not_loaded"
+            }
+            if not get_conversational_chain:
+                overall_healthy = False
+        except Exception as e:
+            health_status["chat_service"]["retriever_chain"] = {
+                "status": "unavailable",
+                "error": str(e)
+            }
+            overall_healthy = False
         
         # Check router status
         health_status["routers"] = _router_status
@@ -438,6 +482,105 @@ if app is not None and FASTAPI_AVAILABLE:
     # Ensure at least health endpoint works
     if not _router_status.get('chat', False):
         logger.error("WARNING: Chat router failed to load. /chat/query will not work.")
+
+    # Add diagnostic endpoint to help debug service imports
+    @app.get("/debug/services")
+    async def debug_services():
+        """Diagnostic endpoint to check service import status and errors."""
+        import os
+        import sys
+        import traceback
+        
+        diagnostics = {
+            "environment_variables": {},
+            "service_imports": {},
+            "import_errors": {},
+            "recommendations": []
+        }
+        
+        # Check environment variables
+        required_vars = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"]
+        for var in required_vars:
+            value = os.getenv(var)
+            diagnostics["environment_variables"][var] = {
+                "set": value is not None and value != "",
+                "length": len(value) if value else 0,
+                "preview": value[:10] + "..." if value and len(value) > 10 else value if value else None
+            }
+            if not value or value == "":
+                diagnostics["recommendations"].append(f"Set {var} in Vercel environment variables")
+        
+        # Try importing services with detailed error capture
+        services_to_test = {
+            "vector_store": "app.services.vector_store",
+            "retriever_chain": "app.services.retriever_chain",
+            "embedding_manager": "app.services.embedding_manager",
+            "supabase_client": "app.database.supabase"
+        }
+        
+        for service_name, module_path in services_to_test.items():
+            try:
+                module = __import__(module_path, fromlist=[''])
+                diagnostics["service_imports"][service_name] = {
+                    "status": "success",
+                    "module": module_path
+                }
+                
+                # Try to get specific functions
+                if service_name == "vector_store":
+                    if hasattr(module, 'load_supabase_vectorstore'):
+                        func = getattr(module, 'load_supabase_vectorstore')
+                        diagnostics["service_imports"][service_name]["function"] = "available"
+                        # Try to actually call it
+                        try:
+                            vs = func()
+                            diagnostics["service_imports"][service_name]["initialization"] = "success"
+                        except Exception as e:
+                            diagnostics["service_imports"][service_name]["initialization"] = "failed"
+                            diagnostics["service_imports"][service_name]["initialization_error"] = str(e)
+                            diagnostics["import_errors"][service_name] = str(e)
+                    else:
+                        diagnostics["service_imports"][service_name]["function"] = "missing"
+                        
+                elif service_name == "retriever_chain":
+                    if hasattr(module, 'get_conversational_chain'):
+                        diagnostics["service_imports"][service_name]["function"] = "available"
+                    else:
+                        diagnostics["service_imports"][service_name]["function"] = "missing"
+                        
+            except ImportError as e:
+                diagnostics["service_imports"][service_name] = {
+                    "status": "import_error",
+                    "error": str(e)
+                }
+                diagnostics["import_errors"][service_name] = str(e)
+                diagnostics["recommendations"].append(f"Fix import error for {service_name}: {str(e)}")
+            except Exception as e:
+                diagnostics["service_imports"][service_name] = {
+                    "status": "error",
+                    "error": str(e),
+                    "traceback": traceback.format_exc()
+                }
+                diagnostics["import_errors"][service_name] = str(e)
+                diagnostics["recommendations"].append(f"Fix error for {service_name}: {str(e)}")
+        
+        # Check if Supabase can be initialized
+        try:
+            from app.database.supabase import get_supabase
+            supabase = get_supabase()
+            diagnostics["supabase_connection"] = {
+                "status": "success",
+                "client_type": str(type(supabase))
+            }
+        except Exception as e:
+            diagnostics["supabase_connection"] = {
+                "status": "failed",
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+            diagnostics["recommendations"].append(f"Fix Supabase connection: {str(e)}")
+        
+        return diagnostics
 
     # Add diagnostic endpoint to help debug router loading
     @app.get("/debug/routers")
