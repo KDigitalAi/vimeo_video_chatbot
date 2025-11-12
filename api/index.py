@@ -1,6 +1,9 @@
 # Safe import with error handling to prevent serverless function crashes
 try:
     from app.main import app
+    # Check if app is None (FastAPI import failed)
+    if app is None:
+        raise ImportError("FastAPI app is None - FastAPI import likely failed")
     # Explicit export for Vercel serverless
     handler = app
 except Exception as e:

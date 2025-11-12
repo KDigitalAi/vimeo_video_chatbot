@@ -7,14 +7,30 @@ import time
 from datetime import datetime
 
 # Core FastAPI imports - must be at top level for Vercel
+# DO NOT raise exceptions here - let api/index.py handle them
 try:
     from fastapi import FastAPI, Request, HTTPException, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import JSONResponse
     from fastapi.exceptions import RequestValidationError
+    FASTAPI_AVAILABLE = True
 except ImportError as e:
-    raise ImportError(f"FastAPI not available: {e}")
+    # Log but don't raise - api/index.py will handle this
+    import logging
+    logging.basicConfig(level=logging.ERROR)
+    logger = logging.getLogger(__name__)
+    logger.error(f"FastAPI not available: {e}")
+    FASTAPI_AVAILABLE = False
+    # Set dummy values to prevent NameError
+    FastAPI = None
+    Request = None
+    HTTPException = None
+    status = None
+    CORSMiddleware = None
+    GZipMiddleware = None
+    JSONResponse = None
+    RequestValidationError = None
 
 # Safe settings import with fallback
 try:
@@ -43,139 +59,155 @@ except Exception:
         pass
 
 # Create FastAPI app - minimal configuration
-app = FastAPI(
-    title="Vimeo Video Knowledge Chatbot",
-    description="RAG-powered chatbot for Vimeo video content",
-    version="1.0.0",
-    docs_url=None,  # Disable in production
-    redoc_url=None,
-    openapi_url=None,
-)
+# Only create app if FastAPI is available
+if FASTAPI_AVAILABLE:
+    app = FastAPI(
+        title="Vimeo Video Knowledge Chatbot",
+        description="RAG-powered chatbot for Vimeo video content",
+        version="1.0.0",
+        docs_url=None,  # Disable in production
+        redoc_url=None,
+        openapi_url=None,
+    )
+else:
+    # Create a dummy app object to prevent NameError
+    # api/index.py will handle the actual error
+    app = None
 
 # Add GZip middleware
-try:
-    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
-except Exception as e:
-    logger.warning(f"GZipMiddleware failed: {e}")
+if app is not None and FASTAPI_AVAILABLE:
+    try:
+        app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
+    except Exception as e:
+        logger.warning(f"GZipMiddleware failed: {e}")
 
 # Add CORS middleware
-try:
-    origins_str = getattr(settings, 'ALLOWED_ORIGINS', '*')
-    if origins_str and origins_str != '*':
-        origins = [o.strip() for o in origins_str.split(",") if o.strip()]
-    else:
-        origins = ["*"]
-    
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["*"]
-    )
-except Exception as e:
-    logger.warning(f"CORS middleware failed: {e}")
+if app is not None and FASTAPI_AVAILABLE:
+    try:
+        origins_str = getattr(settings, 'ALLOWED_ORIGINS', '*')
+        if origins_str and origins_str != '*':
+            origins = [o.strip() for o in origins_str.split(",") if o.strip()]
+        else:
+            origins = ["*"]
+        
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["*"]
+        )
+    except Exception as e:
+        logger.warning(f"CORS middleware failed: {e}")
 
 # Security headers middleware
-_SECURITY_HEADERS = {
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "X-XSS-Protection": "1; mode=block",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-}
+if app is not None and FASTAPI_AVAILABLE:
+    _SECURITY_HEADERS = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+    }
 
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    """Add security headers."""
-    response = await call_next(request)
-    for key, value in _SECURITY_HEADERS.items():
-        response.headers[key] = value
-    return response
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        """Add security headers."""
+        response = await call_next(request)
+        for key, value in _SECURITY_HEADERS.items():
+            response.headers[key] = value
+        return response
 
 # Rate limiting - optional
-try:
-    from app.core.middleware import rate_limit_middleware
-    app.middleware("http")(rate_limit_middleware)
-except Exception as e:
-    logger.warning(f"Rate limiting not available: {e}")
+if app is not None and FASTAPI_AVAILABLE:
+    try:
+        from app.core.middleware import rate_limit_middleware
+        app.middleware("http")(rate_limit_middleware)
+    except Exception as e:
+        logger.warning(f"Rate limiting not available: {e}")
 
 # Exception handlers
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "error": "validation_error",
-            "message": "Request validation failed",
-            "details": {"errors": exc.errors()},
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
+if app is not None and FASTAPI_AVAILABLE:
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={
+                "error": "validation_error",
+                "message": "Request validation failed",
+                "details": {"errors": exc.errors()},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": "http_error",
-            "message": str(exc.detail),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": "http_error",
+                "message": str(exc.detail),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unexpected error: {str(exc)}")
-    error_msg = "Internal server error" if settings.is_production else str(exc)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": "internal_error",
-            "message": error_msg,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, exc: Exception):
+        logger.exception(f"Unexpected error: {str(exc)}")
+        error_msg = "Internal server error" if settings.is_production else str(exc)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal_error",
+                "message": error_msg,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
 
 # Health check - must work without dependencies
-@app.get("/health")
-async def health_check():
-    """Health check endpoint - minimal, no dependencies."""
-    try:
-        return {
-            "status": "healthy",
-            "version": "1.0.0",
-            "environment": getattr(settings, 'ENVIRONMENT', 'production'),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        # Even if settings fail, return basic health
-        return {
-            "status": "degraded",
-            "version": "1.0.0",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+if app is not None and FASTAPI_AVAILABLE:
+    @app.get("/health")
+    async def health_check():
+        """Health check endpoint - minimal, no dependencies."""
+        try:
+            return {
+                "status": "healthy",
+                "version": "1.0.0",
+                "environment": getattr(settings, 'ENVIRONMENT', 'production'),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            # Even if settings fail, return basic health
+            return {
+                "status": "degraded",
+                "version": "1.0.0",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "message": "Vimeo Video Chatbot API",
-        "version": "1.0.0",
-        "status": "running",
-        "environment": getattr(settings, 'ENVIRONMENT', 'production'),
-        "endpoints": {
-            "health": "/health",
-            "chat": "/chat/query",
-        },
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    # Root endpoint
+    @app.get("/")
+    async def root():
+        """Root endpoint."""
+        return {
+            "message": "Vimeo Video Chatbot API",
+            "version": "1.0.0",
+            "status": "running",
+            "environment": getattr(settings, 'ENVIRONMENT', 'production'),
+            "endpoints": {
+                "health": "/health",
+                "chat": "/chat/query",
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 # Load routers with error handling - each router loads independently
 def _safe_include_router(router_name: str, router_module: str, prefix: str = None, tags: list = None):
     """Safely include a router with error handling."""
+    if app is None or not FASTAPI_AVAILABLE:
+        logger.error(f"Cannot load {router_name} router: FastAPI app is not available")
+        return False
+    
     try:
         logger.info(f"Attempting to load {router_name} router from {router_module}")
         module = __import__(router_module, fromlist=['router'])
@@ -212,93 +244,93 @@ def _safe_include_router(router_name: str, router_module: str, prefix: str = Non
         logger.error(f"Full traceback:\n{traceback.format_exc()}")
         return False
 
-# Load routers - each one independently so failures don't cascade
-# Wrap in try/except to ensure app can start even if routers fail
+# Initialize router status - accessible everywhere
 _router_status = {}
 
-try:
-    # Load chat router (most important)
-    _router_status['chat'] = _safe_include_router(
-        "chat",
-        "app.api.routes.chat",
-        prefix="/chat",
-        tags=["chat"]
-    )
-except Exception as e:
-    logger.error(f"Critical: Failed to load chat router: {e}")
-    _router_status['chat'] = False
+# Load routers only if app is available
+if app is not None and FASTAPI_AVAILABLE:
+    # Load routers - each one independently so failures don't cascade
+    # Wrap in try/except to ensure app can start even if routers fail
 
-try:
-    # Load other routers (optional)
-    _router_status['webhooks'] = _safe_include_router(
-        "webhooks",
-        "app.api.routes.webhooks",
-        tags=["webhooks"]
-    )
-except Exception as e:
-    logger.warning(f"Failed to load webhooks router: {e}")
-    _router_status['webhooks'] = False
-
-try:
-    _router_status['ingest'] = _safe_include_router(
-        "ingest",
-        "app.api.routes.ingest",
-        prefix="/ingest",
-        tags=["ingest"]
-    )
-except Exception as e:
-    logger.warning(f"Failed to load ingest router: {e}")
-    _router_status['ingest'] = False
-
-try:
-    _router_status['pdf'] = _safe_include_router(
-        "pdf",
-        "app.api.routes.pdf_ingest",
-        prefix="/pdf",
-        tags=["pdf"]
-    )
-except Exception as e:
-    logger.warning(f"Failed to load pdf router: {e}")
-    _router_status['pdf'] = False
-
-# Log router status
-logger.info(f"Router loading status: {_router_status}")
-
-# Ensure at least health endpoint works
-if not _router_status.get('chat', False):
-    logger.error("WARNING: Chat router failed to load. /chat/query will not work.")
-
-# Export app for Vercel - required at module level
-# Vercel Python serverless functions expect 'app' to be exported
-# This is the handler that Vercel will use
-
-# Add diagnostic endpoint to help debug router loading
-@app.get("/debug/routers")
-async def debug_routers():
-    """Debug endpoint to check router loading status - works in production."""
     try:
-        # Get all registered routes
-        routes_info = []
-        for route in app.routes:
-            route_info = {
-                "path": route.path,
-                "name": getattr(route, 'name', 'unknown')
-            }
-            # Get methods if available
-            if hasattr(route, 'methods'):
-                route_info["methods"] = list(route.methods)
-            routes_info.append(route_info)
-        
-        return {
-            "router_status": _router_status,
-            "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
-            "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
-            "available_routes": routes_info,
-            "total_routes": len(routes_info)
-        }
+        # Load chat router (most important)
+        _router_status['chat'] = _safe_include_router(
+            "chat",
+            "app.api.routes.chat",
+            prefix="/chat",
+            tags=["chat"]
+        )
     except Exception as e:
-        return {
-            "error": str(e),
-            "router_status": _router_status,
-            "environment": getattr(settings, 'ENVIRONMENT', 'unknown')
-        }
+        logger.error(f"Critical: Failed to load chat router: {e}")
+        _router_status['chat'] = False
+
+    try:
+        # Load other routers (optional)
+        _router_status['webhooks'] = _safe_include_router(
+            "webhooks",
+            "app.api.routes.webhooks",
+            tags=["webhooks"]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load webhooks router: {e}")
+        _router_status['webhooks'] = False
+
+    try:
+        _router_status['ingest'] = _safe_include_router(
+            "ingest",
+            "app.api.routes.ingest",
+            prefix="/ingest",
+            tags=["ingest"]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load ingest router: {e}")
+        _router_status['ingest'] = False
+
+    try:
+        _router_status['pdf'] = _safe_include_router(
+            "pdf",
+            "app.api.routes.pdf_ingest",
+            prefix="/pdf",
+            tags=["pdf"]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load pdf router: {e}")
+        _router_status['pdf'] = False
+
+    # Log router status
+    logger.info(f"Router loading status: {_router_status}")
+
+    # Ensure at least health endpoint works
+    if not _router_status.get('chat', False):
+        logger.error("WARNING: Chat router failed to load. /chat/query will not work.")
+
+    # Add diagnostic endpoint to help debug router loading
+    @app.get("/debug/routers")
+    async def debug_routers():
+        """Debug endpoint to check router loading status - works in production."""
+        try:
+            # Get all registered routes
+            routes_info = []
+            for route in app.routes:
+                route_info = {
+                    "path": route.path,
+                    "name": getattr(route, 'name', 'unknown')
+                }
+                # Get methods if available
+                if hasattr(route, 'methods'):
+                    route_info["methods"] = list(route.methods)
+                routes_info.append(route_info)
+            
+            return {
+                "router_status": _router_status,
+                "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
+                "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
+                "available_routes": routes_info,
+                "total_routes": len(routes_info)
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "router_status": _router_status,
+                "environment": getattr(settings, 'ENVIRONMENT', 'unknown')
+            }
