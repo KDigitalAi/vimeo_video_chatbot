@@ -515,7 +515,9 @@ if app is not None and FASTAPI_AVAILABLE:
             "vector_store": "app.services.vector_store",
             "retriever_chain": "app.services.retriever_chain",
             "embedding_manager": "app.services.embedding_manager",
-            "supabase_client": "app.database.supabase"
+            "supabase_client": "app.database.supabase",
+            "models": "app.models",
+            "models_schemas": "app.models.schemas"
         }
         
         for service_name, module_path in services_to_test.items():
@@ -547,6 +549,30 @@ if app is not None and FASTAPI_AVAILABLE:
                         diagnostics["service_imports"][service_name]["function"] = "available"
                     else:
                         diagnostics["service_imports"][service_name]["function"] = "missing"
+                        
+                elif service_name == "models":
+                    # Check if it's a package
+                    if hasattr(module, '__path__'):
+                        diagnostics["service_imports"][service_name]["is_package"] = True
+                        # Try to check if schemas exists
+                        try:
+                            import app.models.schemas
+                            diagnostics["service_imports"][service_name]["schemas_available"] = True
+                        except Exception as schemas_error:
+                            diagnostics["service_imports"][service_name]["schemas_available"] = False
+                            diagnostics["service_imports"][service_name]["schemas_error"] = str(schemas_error)
+                    else:
+                        diagnostics["service_imports"][service_name]["is_package"] = False
+                        
+                elif service_name == "models_schemas":
+                    if hasattr(module, 'ChatRequest'):
+                        diagnostics["service_imports"][service_name]["ChatRequest"] = "available"
+                    else:
+                        diagnostics["service_imports"][service_name]["ChatRequest"] = "missing"
+                    if hasattr(module, 'ChatResponse'):
+                        diagnostics["service_imports"][service_name]["ChatResponse"] = "available"
+                    else:
+                        diagnostics["service_imports"][service_name]["ChatResponse"] = "missing"
                         
             except ImportError as e:
                 diagnostics["service_imports"][service_name] = {

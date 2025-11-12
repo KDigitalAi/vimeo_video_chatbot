@@ -75,10 +75,43 @@ except ImportError:
 ChatRequest = None
 ChatResponse = None
 
+# Try importing schemas with step-by-step verification
 try:
-    from app.models.schemas import ChatRequest, ChatResponse
+    import sys
+    import os
+    
+    # First, verify app package can be imported
+    try:
+        import app
+        if not hasattr(app, '__path__'):
+            raise ImportError("app is not a package")
+    except ImportError as e:
+        raise ImportError(f"Cannot import app package: {e}")
+    
+    # Second, verify app.models can be imported
+    try:
+        import app.models
+        if not hasattr(app.models, '__path__'):
+            raise ImportError("app.models is not a package")
+    except ImportError as e:
+        raise ImportError(f"Cannot import app.models package: {e}")
+    
+    # Third, try importing the schemas module
+    try:
+        from app.models import schemas
+    except ImportError as e:
+        raise ImportError(f"Cannot import app.models.schemas module: {e}")
+    
+    # Finally, import the classes
+    if not hasattr(schemas, 'ChatRequest') or not hasattr(schemas, 'ChatResponse'):
+        raise ImportError("ChatRequest or ChatResponse not found in schemas module")
+    
+    ChatRequest = schemas.ChatRequest
+    ChatResponse = schemas.ChatResponse
+    
     if ChatRequest is None or ChatResponse is None:
         _import_errors['schemas'] = "ChatRequest or ChatResponse is None after import"
+        
 except ImportError as e:
     import logging
     import traceback
@@ -86,6 +119,24 @@ except ImportError as e:
     _import_errors['schemas'] = error_msg
     logging.error(f"Failed to import schemas: {error_msg}")
     logging.error(f"Traceback: {traceback.format_exc()}")
+    # Add diagnostic info
+    try:
+        import sys
+        logging.error(f"Python path: {sys.path[:5]}")
+        logging.error(f"Current dir: {os.getcwd()}")
+        logging.error(f"File location: {__file__}")
+        # Check if app directory exists
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file_dir)))
+        app_dir = os.path.join(project_root, "app")
+        models_dir = os.path.join(app_dir, "models")
+        logging.error(f"Project root: {project_root}")
+        logging.error(f"App dir exists: {os.path.exists(app_dir)}")
+        logging.error(f"Models dir exists: {os.path.exists(models_dir)}")
+        if os.path.exists(models_dir):
+            logging.error(f"Models dir contents: {os.listdir(models_dir)}")
+    except Exception as diag_error:
+        logging.error(f"Could not gather diagnostics: {diag_error}")
 except Exception as e:
     import logging
     import traceback
