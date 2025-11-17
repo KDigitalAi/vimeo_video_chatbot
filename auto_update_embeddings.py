@@ -221,7 +221,7 @@ class AutoUpdateEmbeddings:
                 logger.warning(f"Uploads directory {self.uploads_dir} does not exist")
                 return pdf_files
             
-            for file_path in self.uploads_dir.glob("*.pdf"):
+            for file_path in self.uploads_dir.glob("**/*.pdf"):
                 if file_path.is_file():
                     pdf_files.append(file_path)
             
