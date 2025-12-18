@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API key")
     SUPABASE_URL: str = Field(default="", description="Supabase project URL")
     SUPABASE_SERVICE_KEY: str = Field(default="", description="Supabase service role key")
-    VIMEO_ACCESS_TOKEN: str = Field(default="", description="Vimeo API access token")
+    # VIMEO_ACCESS_TOKEN removed - PDF-only mode
     
     # AI Model Configuration
     EMBEDDING_MODEL: str = Field(default="text-embedding-3-small", description="OpenAI embedding model")
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     # Text Processing Configuration
     CHUNK_SIZE: int = Field(default=1000, description="Text chunk size")
     CHUNK_OVERLAP: int = Field(default=200, description="Text chunk overlap")
-    SUPABASE_TABLE: str = Field(default="video_embeddings", description="Supabase table name")
+    SUPABASE_TABLE: str = Field(default="pdf_embeddings", description="Supabase table name (PDF-only mode)")
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = Field(default=60, description="API rate limit per minute")
@@ -138,7 +138,7 @@ except ValueError as ve:
             OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
             SUPABASE_URL = os.getenv("SUPABASE_URL", "")
             SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-            VIMEO_ACCESS_TOKEN = os.getenv("VIMEO_ACCESS_TOKEN", "")
+            # VIMEO_ACCESS_TOKEN removed - PDF-only mode
         settings = MinimalSettings()
 except Exception as e:
     logger.error(f"Failed to load configuration: {e}")
@@ -158,6 +158,6 @@ except Exception as e:
             OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
             SUPABASE_URL = os.getenv("SUPABASE_URL", "")
             SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-            VIMEO_ACCESS_TOKEN = os.getenv("VIMEO_ACCESS_TOKEN", "")
+            # VIMEO_ACCESS_TOKEN removed - PDF-only mode
         settings = MinimalSettings()
 

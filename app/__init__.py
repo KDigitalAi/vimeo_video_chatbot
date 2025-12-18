@@ -1,5 +1,5 @@
 """
-Vimeo Video Chatbot Backend Application.
+PDF Knowledge Chatbot Backend Application.
 """
 
 __version__ = "1.0.0"

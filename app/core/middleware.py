@@ -39,7 +39,11 @@ rate_limiter = RateLimiter()
 
 async def rate_limit_middleware(request: Request, call_next):
     """Rate limiting middleware."""
-    client_ip = request.client.host
+    # Handle serverless environments where request.client might be None
+    if request.client is None:
+        client_ip = "unknown"
+    else:
+        client_ip = request.client.host or "unknown"
     
     if not rate_limiter.is_allowed(client_ip):
         raise HTTPException(

@@ -40,13 +40,7 @@ except Exception as e:
     logging.basicConfig(level=logging.WARNING)
     logger = logging.getLogger(__name__)
     logger.error(f"Failed to load settings: {e}")
-    # Minimal fallback settings
-    class MinimalSettings:
-        ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
-        is_development = False
-        is_production = True
-        ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
-    settings = MinimalSettings()
+    raise ImportError("Settings module is required - cannot start application without proper configuration")
 
 # Safe logger import
 try:
@@ -61,13 +55,26 @@ except Exception:
 # Create FastAPI app - minimal configuration
 # Only create app if FastAPI is available
 if FASTAPI_AVAILABLE:
+    # Enable Swagger UI only in non-production environments
+    # This allows developers to test APIs locally without exposing docs in production
+    try:
+        is_production = settings.is_production
+    except (AttributeError, Exception):
+        # Fallback: check ENVIRONMENT directly
+        env = getattr(settings, 'ENVIRONMENT', 'production')
+        is_production = env == 'production'
+    
+    docs_url = "/docs" if not is_production else None
+    redoc_url = "/redoc" if not is_production else None
+    openapi_url = "/openapi.json" if not is_production else None
+    
     app = FastAPI(
-        title="Vimeo Video Knowledge Chatbot",
-        description="RAG-powered chatbot for Vimeo video content",
+        title="PDF Knowledge Chatbot",
+        description="RAG-powered chatbot for PDF document content",
         version="1.0.0",
-        docs_url=None,  # Disable in production
-        redoc_url=None,
-        openapi_url=None,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
     )
 else:
     # Create a dummy app object to prevent NameError
@@ -261,25 +268,7 @@ if app is not None and FASTAPI_AVAILABLE:
             }
             overall_healthy = False
         
-        # Check Vimeo
-        try:
-            vimeo_token = os.getenv("VIMEO_ACCESS_TOKEN")
-            if vimeo_token:
-                health_status["services"]["vimeo"] = {
-                    "status": "available",
-                    "token": "configured"
-                }
-            else:
-                health_status["services"]["vimeo"] = {
-                    "status": "unavailable",
-                    "token": "missing"
-                }
-                # Vimeo is optional, so don't mark overall as unhealthy
-        except Exception as e:
-            health_status["services"]["vimeo"] = {
-                "status": "error",
-                "error": str(e)
-            }
+        # Vimeo service disabled - PDF-only mode
         
         # Check Chat Service Components
         try:
@@ -339,7 +328,7 @@ if app is not None and FASTAPI_AVAILABLE:
     async def root():
         """Root endpoint - API discovery that lists available endpoints."""
         return {
-            "message": "Vimeo Video Chatbot API",
+            "message": "PDF Knowledge Chatbot API",
             "version": "1.0.0",
             "status": "running",
             "environment": getattr(settings, 'ENVIRONMENT', 'production'),
@@ -356,10 +345,6 @@ if app is not None and FASTAPI_AVAILABLE:
                     "clear_memory": "/chat/clear-memory/{session_id}",
                     "delete_history": "DELETE /chat/history/{user_id}"
                 },
-                "ingest": {
-                    "video": "/ingest/video/{video_id}",
-                    "health": "/ingest/health"
-                },
                 "pdf": {
                     "upload": "/pdf/upload",
                     "pdf": "/pdf/pdf",  # Alias for upload
@@ -367,11 +352,6 @@ if app is not None and FASTAPI_AVAILABLE:
                     "list": "/pdf/list",
                     "status": "/pdf/{pdf_id}/status",
                     "delete": "DELETE /pdf/{pdf_id}"
-                },
-                "webhooks": {
-                    "vimeo": "/webhooks/vimeo",
-                    "health": "/webhooks/health",
-                    "test": "/webhooks/test/{video_id}"
                 },
                 "debug": {
                     "routers": "/debug/routers"
@@ -443,27 +423,11 @@ if app is not None and FASTAPI_AVAILABLE:
         logger.error(f"Critical: Failed to load chat router: {e}")
         _router_status['chat'] = False
 
-    try:
-        # Load other routers (optional)
-        _router_status['webhooks'] = _safe_include_router(
-            "webhooks",
-            "app.api.routes.webhooks",
-            tags=["webhooks"]
-        )
-    except Exception as e:
-        logger.warning(f"Failed to load webhooks router: {e}")
-        _router_status['webhooks'] = False
-
-    try:
-        _router_status['ingest'] = _safe_include_router(
-            "ingest",
-            "app.api.routes.ingest",
-            prefix="/ingest",
-            tags=["ingest"]
-        )
-    except Exception as e:
-        logger.warning(f"Failed to load ingest router: {e}")
-        _router_status['ingest'] = False
+    # Vimeo webhooks router disabled - PDF-only mode
+    _router_status['webhooks'] = False
+    
+    # Vimeo video ingestion router disabled - PDF-only mode
+    _router_status['ingest'] = False
 
     try:
         _router_status['pdf'] = _safe_include_router(
@@ -631,7 +595,6 @@ if app is not None and FASTAPI_AVAILABLE:
                 "OPENAI_API_KEY": "set" if os.getenv("OPENAI_API_KEY") else "missing",
                 "SUPABASE_URL": "set" if os.getenv("SUPABASE_URL") else "missing",
                 "SUPABASE_SERVICE_KEY": "set" if os.getenv("SUPABASE_SERVICE_KEY") else "missing",
-                "VIMEO_ACCESS_TOKEN": "set" if os.getenv("VIMEO_ACCESS_TOKEN") else "missing",
                 "ENVIRONMENT": os.getenv("ENVIRONMENT", "not_set"),
                 "VERCEL": os.getenv("VERCEL", "not_set"),
                 "VERCEL_ENV": os.getenv("VERCEL_ENV", "not_set")

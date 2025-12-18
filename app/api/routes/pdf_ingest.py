@@ -6,7 +6,6 @@ import time
 import uuid
 import gc
 from pathlib import Path
-from functools import lru_cache
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Request
 
 # Safe imports with error handling for serverless environments
@@ -47,29 +46,20 @@ except ImportError as e:
 try:
     from app.config.settings import settings
 except ImportError:
-    import os
-    class MinimalSettings:
-        ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
-        is_development = False
-        is_production = True
-    settings = MinimalSettings()
+    import logging
+    logging.error("Failed to import settings - this should not happen in production")
+    raise
+
+try:
+    from app.services.pdf_ingestion import run_pdf_ingestion_from_content, generate_pdf_id_from_content
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import pdf_ingestion service: {e}")
+    run_pdf_ingestion_from_content = None
+    generate_pdf_id_from_content = None
 
 _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 _BATCH_CLEANUP_INTERVAL = 3
-
-@lru_cache(maxsize=64)
-def _get_temp_file_path(pdf_id: str) -> str:
-    """Generate temporary file path for PDF - serverless-safe."""
-    # Use /tmp directory for serverless environments (Vercel, AWS Lambda, etc.)
-    # This is the only writable directory in serverless environments
-    temp_dir = os.environ.get("TMPDIR", "/tmp")
-    try:
-        # Ensure temp directory exists (safe to call multiple times)
-        os.makedirs(temp_dir, exist_ok=True)
-    except Exception as e:
-        logger.warning(f"Could not create temp directory {temp_dir}: {e}, using /tmp")
-        temp_dir = "/tmp"
-    return os.path.join(temp_dir, f"temp_{pdf_id}.pdf")
 
 router = APIRouter()
 
@@ -109,9 +99,7 @@ async def ingest_pdf(
     force_reprocess: bool = Form(False)
 ):
     """
-    Ingest PDF file and generate embeddings with ultra-optimized processing.
-    Time Complexity: O(n) where n is PDF content size
-    Space Complexity: O(1) - constant memory usage with immediate cleanup
+    Ingest PDF file using the shared PDF ingestion service.
     
     Args:
         file: PDF file to upload
@@ -123,103 +111,81 @@ async def ingest_pdf(
     Raises:
         HTTPException: For various error conditions
     """
-    start_time = time.time()
-    pdf_id = str(uuid.uuid4())
-    temp_path = None
+    # Check if required services are available
+    if PDFIngestResponse is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF ingestion service is not properly configured. Please check server logs."
+        )
+    
+    if run_pdf_ingestion_from_content is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF ingestion pipeline service is not available. Please check server configuration."
+        )
     
     try:
-        # Check memory before processing - O(1)
-        if not check_memory_threshold():
-            logger.warning("Memory usage high before PDF processing")
-            cleanup_memory()
-        
-        # Optimized file validation - O(1)
+        # Validate file
         if not file.filename or not file.filename.lower().endswith('.pdf'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only PDF files are supported"
             )
         
-        # Optimized file size check - O(1)
+        # Read file content
         content = await file.read()
+        
+        # Check file size
         if len(content) > _MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail="PDF file too large. Maximum size is 50MB"
             )
         
-        # Use cached temp file path - O(1)
-        temp_path = _get_temp_file_path(pdf_id)
-        with open(temp_path, "wb") as buffer:
-            buffer.write(content)
+        # Generate PDF ID from content
+        pdf_id = generate_pdf_id_from_content(content) if generate_pdf_id_from_content else str(uuid.uuid4())
         
-        # Clean up content immediately - O(1)
+        # Use shared PDF ingestion service
+        result = run_pdf_ingestion_from_content(
+            pdf_content=content,
+            pdf_id=pdf_id,
+            pdf_title=file.filename,
+            force_reprocess=force_reprocess
+        )
+        
+        # Clean up content immediately
         del content
         gc.collect()
         
-        # Optimized PDF validation - O(1)
-        if not validate_pdf_file(temp_path):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or corrupted PDF file"
-            )
-        
-        # Optimized duplicate check - O(1)
-        if not force_reprocess and check_duplicate_pdf(pdf_id):
-            logger.info(f"PDF {pdf_id} already exists, skipping processing")
-            return PDFIngestResponse(
-                pdf_id=pdf_id,
-                filename=file.filename,
-                chunks_processed=0,
-                embeddings_stored=0,
-                processing_time=time.time() - start_time,
-                status="duplicate_skipped"
-            )
-        
-        # Get PDF metadata - O(1)
-        metadata = get_pdf_metadata(temp_path)
-        logger.info(f"Processing PDF: {file.filename} ({metadata.get('page_count', 0)} pages)")
-        
-        # Process PDF file - O(n) where n is content size
-        log_memory_usage("starting PDF processing")
-        chunks = process_pdf_file(temp_path, pdf_id, file.filename)
-        
-        if not chunks:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No text content found in PDF"
-            )
-        
-        # Clean up temp file immediately - O(1)
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
-            temp_path = None
-        
-        # Store embeddings - O(c) where c is number of chunks
-        log_memory_usage("starting PDF embedding storage")
-        stored_count = store_pdf_embeddings(chunks)
-        
-        # Clean up chunks to free memory immediately - O(1)
-        chunk_count = len(chunks)
-        del chunks
-        gc.collect()
-        
-        processing_time = time.time() - start_time
-        
-        logger.info(f"SUCCESS: PDF processing completed for {file.filename} in {processing_time:.2f}s")
-        log_memory_usage("PDF processing completed")
+        # Convert result to HTTP response
+        if not result.success:
+            if result.status == "error":
+                if "not found" in result.error.lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=result.error
+                    )
+                elif "invalid" in result.error.lower() or "corrupted" in result.error.lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=result.error
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=result.error or "Failed to process PDF"
+                    )
         
         return PDFIngestResponse(
-            pdf_id=pdf_id,
-            filename=file.filename,
-            chunks_processed=chunk_count,
-            embeddings_stored=stored_count,
-            processing_time=processing_time,
-            status="success"
+            pdf_id=result.pdf_id,
+            filename=result.filename,
+            chunks_processed=result.chunks_processed,
+            embeddings_stored=result.embeddings_stored,
+            processing_time=result.processing_time,
+            status=result.status
         )
         
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
         logger.error(f"PDF ingestion failed: {e}")
@@ -228,13 +194,6 @@ async def ingest_pdf(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process PDF: {str(e)}"
         )
-    finally:
-        # Clean up temporary file - O(1)
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception as e:
-                logger.warning(f"Failed to remove temp file {temp_path}: {e}")
 
 @router.get("/upload/batch")
 async def ingest_pdf_batch_info(request: Request):

@@ -6,6 +6,12 @@ from typing import List, Dict, Any
 from app.services.vector_store_direct import store_embeddings_directly
 from app.utils.logger import logger
 
+# Shared Supabase client access - DRY consolidation
+def _get_supabase_client():
+    """Get Supabase client - centralized to avoid repetition."""
+    from app.database.supabase import get_supabase
+    return get_supabase()
+
 def store_pdf_embeddings(chunks: List[Dict[str, Any]], table_name: str = "pdf_embeddings") -> int:
     """
     Store PDF embeddings using the unified vector store.
@@ -26,9 +32,8 @@ def store_pdf_embeddings(chunks: List[Dict[str, Any]], table_name: str = "pdf_em
 
 def check_duplicate_pdf(pdf_id: str, table_name: str = "pdf_embeddings") -> bool:
     """Check if PDF embeddings already exist for a given PDF ID."""
-    from app.database.supabase import get_supabase
     try:
-        supabase_client = get_supabase()
+        supabase_client = _get_supabase_client()
         result = supabase_client.table(table_name).select("id").eq("pdf_id", pdf_id).limit(1).execute()
         return len(result.data) > 0 if result.data else False
     except Exception as e:
@@ -37,9 +42,8 @@ def check_duplicate_pdf(pdf_id: str, table_name: str = "pdf_embeddings") -> bool
 
 def delete_pdf_embeddings(pdf_id: str, table_name: str = "pdf_embeddings") -> int:
     """Delete all embeddings for a specific PDF."""
-    from app.database.supabase import get_supabase
     try:
-        supabase_client = get_supabase()
+        supabase_client = _get_supabase_client()
         result = supabase_client.table(table_name).delete().eq("pdf_id", pdf_id).execute()
         deleted_count = len(result.data) if result.data else 0
         logger.info(f"Deleted {deleted_count} embeddings for PDF {pdf_id}")
@@ -50,20 +54,24 @@ def delete_pdf_embeddings(pdf_id: str, table_name: str = "pdf_embeddings") -> in
 
 def get_pdf_embeddings_count(pdf_id: str, table_name: str = "pdf_embeddings") -> int:
     """Get the number of embeddings for a specific PDF."""
-    from app.database.supabase import get_supabase
     try:
-        supabase_client = get_supabase()
+        supabase_client = _get_supabase_client()
         result = supabase_client.table(table_name).select("id", count="exact").eq("pdf_id", pdf_id).execute()
-        return result.count if result.count else 0
+        # Check if count attribute exists (PostgREST may return it differently)
+        if hasattr(result, 'count') and result.count is not None:
+            return result.count
+        # Fallback: count the data if available
+        if result.data:
+            return len(result.data)
+        return 0
     except Exception as e:
         logger.error(f"Failed to count PDF embeddings for {pdf_id}: {e}")
         return 0
 
 def list_pdf_documents(table_name: str = "pdf_embeddings") -> List[Dict[str, Any]]:
     """List all PDF documents that have embeddings stored."""
-    from app.database.supabase import get_supabase
     try:
-        supabase_client = get_supabase()
+        supabase_client = _get_supabase_client()
         result = supabase_client.table(table_name).select(
             "pdf_id, pdf_title, created_at"
         ).order("created_at", desc=True).execute()

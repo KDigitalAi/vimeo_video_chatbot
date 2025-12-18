@@ -67,3 +67,11 @@ config
 # Temporary files
 *.tmp
 *.temp
+
+# User uploads
+uploads/
+uploads/**/*
+
+# Script logs
+*.log
+auto_update.log

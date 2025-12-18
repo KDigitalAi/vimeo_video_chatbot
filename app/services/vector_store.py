@@ -1,8 +1,8 @@
 """
 Lightweight Supabase-backed vector store shim to satisfy chat.py expectations.
 Provides a `load_supabase_vectorstore()` that returns an object with
-`similarity_search_by_vector_with_relevance_scores` reading from both
-video_embeddings and pdf_embeddings tables.
+`similarity_search_by_vector_with_relevance_scores` reading from
+pdf_embeddings table (PDF-only mode).
 """
 from typing import List, Tuple, Any
 from app.utils.logger import logger
@@ -75,9 +75,13 @@ class SupabaseVectorStore:
     def similarity_search_by_vector_with_relevance_scores(self, query_embedding: list, k: int = 5) -> List[Tuple[_SimpleDocument, float]]:
         results: List[Tuple[_SimpleDocument, float]] = []
 
-        # Query PDFs
+        # Query PDFs with limit to prevent memory issues
+        # Fetch more than k to account for filtering, but not all rows
         try:
-            pdf_rows = self._supabase.table("pdf_embeddings").select("*").execute().data or []
+            # Fetch up to k*3 rows to ensure we have enough after filtering
+            # This prevents loading all embeddings into memory
+            fetch_limit = min(k * 3, 1000)  # Cap at 1000 for safety
+            pdf_rows = self._supabase.table("pdf_embeddings").select("*").limit(fetch_limit).execute().data or []
             for row in pdf_rows:
                 emb = _parse_embedding(row.get("embedding"))
                 if not emb or len(emb) != len(query_embedding):
@@ -94,33 +98,13 @@ class SupabaseVectorStore:
                     },
                 )
                 results.append((doc, score))
-        except Exception:
-            # Ignore pdf failures to keep behavior resilient
-            pass
+        except Exception as e:
+            # Log error but don't crash - return empty results instead
+            logger.error(f"Failed to query PDF embeddings: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
 
-        # Query videos
-        try:
-            vid_rows = self._supabase.table("video_embeddings").select("*").execute().data or []
-            for row in vid_rows:
-                emb = _parse_embedding(row.get("embedding"))
-                if not emb or len(emb) != len(query_embedding):
-                    continue
-                score = _cosine_similarity(query_embedding, emb)
-                doc = _SimpleDocument(
-                    page_content=row.get("content", ""),
-                    metadata={
-                        "source_type": "video",
-                        "video_id": row.get("video_id"),
-                        "video_title": row.get("video_title"),
-                        "timestamp_start": row.get("timestamp_start"),
-                        "timestamp_end": row.get("timestamp_end"),
-                        "chunk_id": row.get("chunk_id"),
-                    },
-                )
-                results.append((doc, score))
-        except Exception:
-            # Ignore video failures to keep behavior resilient
-            pass
+        # Video embeddings query removed - PDF-only mode
 
         # Sort by relevance and trim to top-k
         results.sort(key=lambda x: x[1], reverse=True)

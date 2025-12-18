@@ -25,7 +25,7 @@ def store_chat_interaction(
         session_id: Session identifier for grouping related chats
         user_message: The user's message
         bot_response: The bot's response
-        video_id: Video ID if a video was referenced in the response
+        video_id: Video ID (deprecated - PDF-only mode, kept for database compatibility)
         
     Returns:
         The ID of the stored chat interaction, or None if failed

@@ -50,15 +50,15 @@ def get_supabase():
 
 
 def test_connection():
-    """Test if Supabase is reachable and table exists."""
+    """Test if Supabase is reachable and pdf_embeddings table exists."""
     from app.utils.logger import logger
     try:
-        resp = get_supabase().table("video_embeddings").select("*").limit(1).execute()
-        logger.info(f"Supabase connection OK. Table returned {len(resp.data)} rows.")
+        resp = get_supabase().table("pdf_embeddings").select("*").limit(1).execute()
+        logger.info(f"Supabase connection OK. PDF embeddings table returned {len(resp.data)} rows.")
         if resp.data:
             logger.debug(f"Sample data: {resp.data[0]}")
         else:
-            logger.info("Table exists but no data yet.")
+            logger.info("PDF embeddings table exists but no data yet.")
         return True
     except Exception as e:
         logger.error(f"Supabase connection failed: {e}")

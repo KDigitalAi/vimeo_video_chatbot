@@ -4,7 +4,6 @@ PDF processing module for extracting text and generating embeddings.
 import gc
 import io
 import os
-import asyncio
 import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -420,22 +419,3 @@ def get_pdf_metadata(pdf_path: str) -> Dict[str, Any]:
         logger.error(f"Failed to extract PDF metadata: {e}")
         return {"filename": os.path.basename(pdf_path), "file_size": 0, "page_count": 0}
 
-async def process_pdf_file_async(pdf_path: str, pdf_id: str, pdf_title: str) -> List[Dict[str, Any]]:
-    """Async version of PDF processing for concurrent operations.
-    
-    Args:
-        pdf_path: Path to the PDF file
-        pdf_id: Unique identifier for the PDF
-        pdf_title: Title of the PDF document
-        
-    Returns:
-        List of text chunks with metadata
-    """
-    # Run the synchronous processing in a thread pool
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, process_pdf_file, pdf_path, pdf_id, pdf_title)
-
-def clear_all_caches():
-    """Clear all PDF caches to free memory."""
-    _clear_pdf_cache()
-    logger.info("All PDF caches cleared")

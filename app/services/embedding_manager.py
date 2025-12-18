@@ -10,12 +10,15 @@ def _get_settings():
     try:
         from app.config.settings import settings
         return settings
-    except Exception:
-        # Return minimal settings object if import fails
-        class MinimalSettings:
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to import settings in embedding_manager: {e}")
+        # Fallback to environment variables only for critical settings
+        import os
+        class FallbackSettings:
             OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
             EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-        return MinimalSettings()
+        return FallbackSettings()
 
 def _get_logger():
     """Lazy import of logger to prevent import-time failures."""

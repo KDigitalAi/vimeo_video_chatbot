@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Optional
 
 # Initialize logger first to prevent import errors
-logger = logging.getLogger("vimeo_chatbot")
+logger = logging.getLogger("pdf_chatbot")
 
 # Optional import for memory monitoring
 try:
@@ -69,7 +69,7 @@ try:
     logger = get_logger()
 except Exception:
     # Fallback to basic logger if get_logger() fails (e.g., filesystem issues)
-    logger = logging.getLogger("vimeo_chatbot")
+    logger = logging.getLogger("pdf_chatbot")
     logger.setLevel(logging.INFO)
     if not logger.handlers:
         handler = logging.StreamHandler()

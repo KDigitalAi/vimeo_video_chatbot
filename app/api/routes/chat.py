@@ -148,12 +148,9 @@ except Exception as e:
 try:
     from app.config.settings import settings
 except ImportError:
-    import os
-    class MinimalSettings:
-        ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
-        is_development = False
-        is_production = True
-    settings = MinimalSettings()
+    import logging
+    logging.error("Failed to import settings - this should not happen in production")
+    raise
 
 router = APIRouter()
 
@@ -203,9 +200,8 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
     Merge and clean content from multiple documents for comprehensive educational presentation.
     Groups content by topic and source for better organization and completeness.
     """
-    # Group documents by source and organize by relevance
+    # Group documents by source and organize by relevance (PDF-only mode)
     pdf_content = []
-    video_content = []
     
     # Sort by relevance score (higher scores first)
     sorted_docs = sorted(relevant_docs, key=lambda x: x[1], reverse=True)
@@ -216,7 +212,11 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
             continue
             
         metadata = getattr(doc, "metadata", {})
-        source_type = metadata.get("source_type")
+        source_type = metadata.get("source_type", "pdf")
+        
+        # Only process PDF content (PDF-only mode)
+        if source_type != "pdf":
+            continue
         
         # Clean and normalize content while preserving structure
         cleaned_content = content.replace('\n', ' ').replace('  ', ' ').strip()
@@ -224,20 +224,10 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
         # Remove excessive whitespace but keep meaningful structure
         cleaned_content = ' '.join(cleaned_content.split())
         
-        if source_type == "pdf":
-            pdf_title = metadata.get("pdf_title", "Unknown PDF")
-            page = metadata.get("page_number", "?")
-            chunk_id = metadata.get("chunk_id", "")
-            pdf_content.append(f"[PDF: {pdf_title}, Page {page}] {cleaned_content}")
-        else:
-            video_title = metadata.get("video_title", "Unknown Video")
-            timestamp_start = metadata.get("timestamp_start", "")
-            timestamp_end = metadata.get("timestamp_end", "")
-            if timestamp_start and timestamp_end:
-                timestamp = f"{timestamp_start}-{timestamp_end}"
-            else:
-                timestamp = "Unknown time"
-            video_content.append(f"[Video: {video_title}, {timestamp}] {cleaned_content}")
+        pdf_title = metadata.get("pdf_title", "Unknown PDF")
+        page = metadata.get("page_number", "?")
+        chunk_id = metadata.get("chunk_id", "")
+        pdf_content.append(f"[PDF: {pdf_title}, Page {page}] {cleaned_content}")
     
     # Combine all content with clear separation and organization
     combined_content = []
@@ -246,14 +236,10 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
         combined_content.append("📚 **PDF Course Materials:**")
         combined_content.append("\n".join(pdf_content))
     
-    if video_content:
-        combined_content.append("🎥 **Video Lectures:**")
-        combined_content.append("\n".join(video_content))
-    
     # Add instruction for comprehensive response
     if combined_content:
         combined_content.append("\n**Instructions for Response:**")
-        combined_content.append("Use ALL the information above to provide a complete, comprehensive explanation. Combine insights from both PDF and video sources when available. Structure your response with clear explanations, practical examples, and key takeaways.")
+        combined_content.append("Use ALL the information above to provide a complete, comprehensive explanation. Structure your response with clear explanations, practical examples, and key takeaways.")
     
     return "\n\n".join(combined_content)
 
@@ -333,66 +319,8 @@ Remember: Make this response clear, educational, and well-structured for student
         return f"**Explanation:**\n{response_text}\n\n**Key Points:**\n• Please refer to the explanation above for key concepts"
 
 
-def _generate_video_based_response(query: str, relevant_docs: list) -> str:
-    """
-    Generate a comprehensive, student-friendly response based on provided content using LLM.
-    Creates detailed, educational explanations suitable for coding institute students.
-    """
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain.schema import HumanMessage, SystemMessage
-        
-        # Merge and clean content from all relevant documents
-        context = _merge_and_clean_content(relevant_docs)
-        
-        # Create enhanced system prompt for comprehensive student-friendly responses
-        system_prompt = """You are an expert programming instructor at a software coaching institute. Your job is to help students learn programming concepts clearly and completely using ONLY the course materials provided.
-
-🎯 **TEACHING MISSION:**
-Create comprehensive, step-by-step explanations that help students truly understand the concepts.
-
-📋 **RESPONSE REQUIREMENTS:**
-1. **Use ONLY the information from the provided course materials below**
-2. **Combine ALL relevant information** from both PDF and video sources
-3. **Create a complete, comprehensive explanation** - don't truncate or summarize too early
-4. **Structure your response with clear sections:**
-   - **Explanation:** Clear, detailed explanation of the concept
-   - **Example:** Practical code examples and demonstrations
-   - **Key Points:** 5-7 important takeaways for students
-5. **Use simple, clear language** appropriate for students
-6. **Provide step-by-step explanations** when possible
-7. **Include practical examples and code snippets** when available
-8. **Format code blocks properly** with syntax highlighting
-9. **Make it engaging and encouraging** for students
-10. **If content is insufficient, clearly state what's missing** and suggest where to find more information
-
-📚 **COURSE MATERIALS TO USE:**
-{context}
-
-🎓 **STUDENT-FOCUSED APPROACH:**
-- Think like a teaching assistant explaining to a student
-- Break down complex concepts into digestible parts
-- Use analogies and real-world examples when helpful
-- Encourage learning and curiosity
-- Make sure students understand the "why" behind concepts
-
-Remember: You are teaching students who want to learn programming. Be thorough, clear, and encouraging!"""
-
-        # Create the LLM instance with optimal temperature for educational content
-        llm = ChatOpenAI(model=settings.LLM_MODEL, temperature=0.3)
-        
-        # Generate comprehensive response
-        messages = [
-            SystemMessage(content=system_prompt.format(context=context)),
-            HumanMessage(content=query)
-        ]
-        
-        response = llm.invoke(messages)
-        return response.content
-        
-    except Exception as e:
-        logger.error(f"Error generating content-based response: {e}")
-        return "I found relevant content but encountered an error processing it. Please try rephrasing your question."
+# Video-based response function removed - PDF-only mode
+# Using _generate_clarification_response for all content-based responses
 
 
 def _generate_clarification_response(query: str, relevant_docs: list) -> str:
@@ -460,7 +388,7 @@ Remember: This student asked for clarification, so they need extra help, encoura
 
 def _generate_llm_fallback_response(query: str, topic_context: str = None) -> str:
     """
-    Generate a complete, structured fallback response when PDF/video content is insufficient.
+    Generate a complete, structured fallback response when PDF content is insufficient.
     Uses last topic context (if available) to stay on-topic and provide a thorough, educational answer.
     """
     try:
@@ -469,7 +397,7 @@ def _generate_llm_fallback_response(query: str, topic_context: str = None) -> st
 
         system_prompt = """You are an expert programming instructor. No course materials were found for this query.
 
-Your task is to provide a complete, accurate, and student-friendly answer that is TOPIC-APPROPRIATE based on the last discussed topic if provided. Do not hallucinate specifics about the student's PDFs/videos. Instead, teach the topic clearly and thoroughly.
+Your task is to provide a complete, accurate, and student-friendly answer that is TOPIC-APPROPRIATE based on the last discussed topic if provided. Do not hallucinate specifics about the student's PDFs. Instead, teach the topic clearly and thoroughly.
 
 Rules:
 1) Stay aligned with the topic context below (if present). Do not drift topics.
@@ -664,7 +592,7 @@ async def _query_chat_handler(request_data: dict):
                 "Hello! I'm your Learning Assistant. How can I help you with your study materials today?",
                 "Hi there! I'm ready to help you learn — what topic would you like to explore?",
                 "Good morning! Let's study together — what would you like to know today?",
-                "Hey! I'm here to help you understand your video and PDF content. What would you like to learn about?",
+                "Hey! I'm here to help you understand your PDF content. What would you like to learn about?",
                 "Hello! Welcome to your study companion. I can help you find information in your uploaded materials. What interests you?",
                 "Hi! I'm your educational assistant. Ready to dive into your learning materials — what's on your mind?"
             ]
@@ -679,7 +607,7 @@ async def _query_chat_handler(request_data: dict):
                     session_id=session_id,
                     user_message=request.query,
                     bot_response=answer,
-                    video_id=None
+                    video_id=None  # PDF-only mode - video_id not used
                 )
                 if settings.is_development:
                     logger.info(f"Greeting interaction stored with ID: {chat_id}")
@@ -699,7 +627,7 @@ async def _query_chat_handler(request_data: dict):
         sources = []
         session_id = request.conversation_id or str(uuid.uuid4())
         
-        # Load vector store for video content queries
+        # Load vector store for PDF content queries
         try:
             global _global_vector_store
             if _global_vector_store is None:
@@ -901,7 +829,7 @@ async def _query_chat_handler(request_data: dict):
                 if best_score >= MINIMUM_THRESHOLD:
                     relevant_docs = [(doc, score) for doc, score in docs_with_scores if score == best_score][:1]
             
-            # Enhanced PDF and Video expansion for complete topic coverage
+            # Enhanced PDF expansion for complete topic coverage
             if relevant_docs:
                 top_doc, top_score = relevant_docs[0]
                 top_metadata = getattr(top_doc, "metadata", {}) or {}
@@ -927,44 +855,8 @@ async def _query_chat_handler(request_data: dict):
                             ))
                             relevant_docs.extend(additional_chunks[:8])
                 
-                elif top_source_type == "video":
-                    # Enhanced video expansion - include chunks from same video with close timestamps
-                    video_id = top_metadata.get("video_id")
-                    if video_id:
-                        additional_chunks = []
-                        for doc, score in docs_with_scores:
-                            md = getattr(doc, "metadata", {}) or {}
-                            if (md.get("source_type") == "video" and 
-                                md.get("video_id") == video_id and 
-                                score >= (MINIMUM_THRESHOLD - 0.1)):
-                                additional_chunks.append((doc, score))
-                        
-                        if additional_chunks:
-                            # Sort by timestamp for chronological order
-                            additional_chunks.sort(key=lambda x: (
-                                _parse_timestamp_to_seconds(getattr(x[0], "metadata", {}).get("timestamp_start"), 0)
-                            ))
-                            relevant_docs.extend(additional_chunks[:6])
-                
-                # Cross-source expansion: if we have both PDF and video content, try to include both
-                has_pdf = any(getattr(doc, "metadata", {}).get("source_type") == "pdf" for doc, _ in relevant_docs)
-                has_video = any(getattr(doc, "metadata", {}).get("source_type") == "video" for doc, _ in relevant_docs)
-                
-                if has_pdf and not has_video:
-                    # Add video content if available
-                    video_chunks = [(doc, score) for doc, score in docs_with_scores 
-                                  if getattr(doc, "metadata", {}).get("source_type") == "video" 
-                                  and score >= (MINIMUM_THRESHOLD - 0.05)]  # Reduced tolerance for cross-source
-                    if video_chunks:
-                        relevant_docs.extend(video_chunks[:3])
-                
-                elif has_video and not has_pdf:
-                    # Add PDF content if available
-                    pdf_chunks = [(doc, score) for doc, score in docs_with_scores 
-                                if getattr(doc, "metadata", {}).get("source_type") == "pdf" 
-                                and score >= (MINIMUM_THRESHOLD - 0.05)]  # Reduced tolerance for cross-source
-                    if pdf_chunks:
-                        relevant_docs.extend(pdf_chunks[:3])
+                # Video expansion logic removed - PDF-only mode
+                # Cross-source expansion removed - PDF-only mode
 
             if not relevant_docs:
                 answer = "Sorry, I don't have this information in the available study materials."
@@ -1039,7 +931,7 @@ Please provide a comprehensive, educational response using the course materials 
                         if is_clarification_request or is_follow_up:
                             raw_answer = _generate_clarification_response(request.query, relevant_docs)
                         else:
-                            raw_answer = _generate_video_based_response(request.query, relevant_docs)
+                            raw_answer = _generate_clarification_response(request.query, relevant_docs)
                         answer = _format_educational_response(raw_answer, request.query)
                     else:
                         # Sufficient context: use conversation chain with memory
@@ -1049,10 +941,7 @@ Please provide a comprehensive, educational response using the course materials 
                         
                 except Exception as e:
                     logger.error(f"Error using conversation chain: {e}")
-                    if is_clarification_request:
-                        raw_answer = _generate_clarification_response(request.query, relevant_docs)
-                    else:
-                        raw_answer = _generate_video_based_response(request.query, relevant_docs)
+                    raw_answer = _generate_clarification_response(request.query, relevant_docs)
                     
                     # Format the fallback response into educational structure (only when context exists)
                     context = _merge_and_clean_content(relevant_docs)
@@ -1066,23 +955,18 @@ Please provide a comprehensive, educational response using the course materials 
                 if request.include_sources:
                     for doc, score in relevant_docs:
                         md = getattr(doc, "metadata", None) or {}
-                        src_type = md.get("source_type")
-                        if src_type == "pdf":
-                            source_name = md.get("pdf_title", "Unknown PDF")
-                        elif src_type == "video":
-                            source_name = md.get("video_title", "Unknown Video")
-                        else:
-                            source_name = "Unknown Source"
+                        src_type = md.get("source_type", "pdf")
+                        
+                        # PDF-only mode - only process PDF sources
+                        if src_type != "pdf":
+                            continue
+                        
+                        source_name = md.get("pdf_title", "Unknown PDF")
 
-                        # Keep existing fields for backwards compatibility. Set video_title to source_name
-                        # so frontends that display video_title will show the correct label for PDFs too.
+                        # PDF-only mode - simplified source metadata
                         sources.append({
-                            "source_type": src_type,
-                            "video_title": source_name,
-                            "video_id": md.get("video_id"),
-                            "timestamp_start": md.get("timestamp_start"),
-                            "timestamp_end": md.get("timestamp_end"),
-                            "pdf_title": md.get("pdf_title"),
+                            "source_type": "pdf",
+                            "pdf_title": source_name,
                             "pdf_id": md.get("pdf_id"),
                             "page_number": md.get("page_number"),
                             "chunk_id": md.get("chunk_id"),
@@ -1117,10 +1001,8 @@ Please provide a comprehensive, educational response using the course materials 
             # Generate session_id if not provided
             session_id = request.conversation_id or str(uuid.uuid4())
             
-            # Extract video_id from sources if available
+            # PDF-only mode - video_id not used
             video_id = None
-            if sources and len(sources) > 0:
-                video_id = sources[0].get("video_id")
             
             # Store the chat interaction
             chat_id = store_chat_interaction(
@@ -1128,7 +1010,7 @@ Please provide a comprehensive, educational response using the course materials 
                 session_id=session_id,
                 user_message=request.query,
                 bot_response=answer,
-                video_id=video_id
+                video_id=None  # PDF-only mode
             )
             
             if chat_id:
@@ -1152,7 +1034,7 @@ Please provide a comprehensive, educational response using the course materials 
                     "user_id": request.user_id or "anonymous",
                     "query_text": request.query,
                     "query_embedding": query_embedding,
-                    "matched_video_id": video_id,
+                    "matched_video_id": None,  # PDF-only mode
                     "matched_chunk_id": sources[0].get("chunk_id") if sources else None
                 }
                 

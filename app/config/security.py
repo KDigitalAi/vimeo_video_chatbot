@@ -30,24 +30,7 @@ def sanitize_input(text: str) -> str:
     
     return text.strip()
 
-def validate_video_id(video_id: str) -> bool:
-    """
-    Validate Vimeo video ID format.
-    
-    Args:
-        video_id: Video ID to validate
-        
-    Returns:
-        True if valid, False otherwise
-    """
-    if not video_id:
-        return False
-    
-    # Vimeo video IDs are numeric strings, typically 6-20 digits
-    if not re.match(r'^\d{6,20}$', str(video_id).strip()):
-        return False
-    
-    return True
+# validate_video_id function removed - PDF-only mode
 
 def validate_query_text(query: str) -> bool:
     """

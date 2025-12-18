@@ -9,56 +9,30 @@ pydantic_core==2.20.1
 
 # OpenAI and AI/ML
 openai==1.50.0
-tiktoken==0.8.0
 
 # LangChain
 langchain==0.3.1
-langchain-community==0.3.1
 langchain-core==0.3.63
 langchain-openai==0.2.0
-langchain-text-splitters==0.3.8
-langsmith==0.1.147
 
-# Supabase
-supabase==2.5.1
-supabase-auth==2.23.0
-supabase-functions==2.23.0
-supafunc==0.4.7
+# Supabase (PostgREST only - direct database access)
 postgrest==0.16.11
-gotrue==2.9.1
-storage3==0.7.7
-realtime==1.0.6
 
 # PDF Processing
 PyPDF2==3.0.1
 PyMuPDF==1.26.6
-pypdf==6.1.3
-pdfminer.six==20250506
-
-# Audio/Video Processing
-pydub==0.25.1
-yt-dlp==2025.10.22
 
 # HTTP and networking
-# Note: httpx and httpcore versions are resolved by dependent packages to avoid conflicts
-requests==2.32.3
-aiohttp==3.13.2
+# Note: httpx and httpcore are installed transitively by openai/langchain/postgrest
 anyio==4.11.0
 
-# Authentication and security
-python-jose==3.3.0
-PyJWT==2.10.1
-bcrypt==5.0.0
-passlib==1.7.4
+# Authentication and security (transitive)
 cryptography==46.0.3
 cffi==2.0.0
 pycparser==2.23
 
 # Utilities
 python-dotenv==1.0.1
-python-dateutil==2.9.0.post0
-PyYAML==6.0.3
-orjson==3.11.4
 numpy==1.26.4
 
 # Core dependencies (required by above packages)
@@ -74,46 +48,25 @@ six==1.17.0
 rsa==4.9.1
 pyasn1==0.6.1
 
-# Additional dependencies
+# Additional dependencies (transitive - auto-installed by pip)
+# These are kept for explicit version pinning, but will be auto-installed anyway
 attrs==25.4.0
 jiter==0.11.1
 h11==0.14.0
 h2==4.3.0
 hpack==4.1.0
 hyperframe==6.1.0
-frozenlist==1.8.0
-aiosignal==1.4.0
-multidict==6.7.0
-yarl==1.22.0
-aiohappyeyeballs==2.6.1
-websockets==12.0
-tenacity==8.5.0
-regex==2025.11.3
-tqdm==4.67.1
+# Note: frozenlist, aiosignal, multidict, yarl, aiohappyeyeballs, websockets removed
+# (were transitive from aiohttp which is no longer needed)
 
-# Database and ORM
-SQLAlchemy==2.0.44
-greenlet==3.2.4
-
-# Rate limiting
-slowapi==0.1.9
-limits==5.6.0
-
-# Logging and monitoring
-structlog==24.4.0
-
-# Note: Removed packages that require system libraries:
-# - pycairo (requires Cairo system library)
-# - weasyprint (requires Cairo and other system libraries)
-# - reportlab (has system dependencies)
-# - rlPyCairo (requires Cairo)
-# - freetype-py (system dependencies)
-# - fonttools (not needed for API)
-# - arabic-reshaper (not used)
-# - xhtml2pdf (not used)
-# - svglib (not used)
-# - cssselect2, html5lib, lxml (not used for core API)
-# - pytest, coverage (testing only)
-# - Flask (not used, FastAPI only)
-# - redis (not used in current implementation)
-# - psutil (optional, can cause issues on some platforms)
+# Note: Removed unused packages:
+# - Vimeo-related: pydub, yt-dlp
+# - Unused PDF libraries: pypdf, pdfminer.six
+# - Unused LangChain: langchain-community, langchain-text-splitters, langsmith, tiktoken
+# - Unused Supabase packages: supabase, supabase-auth, supabase-functions, supafunc, gotrue, storage3, realtime
+# - Unused auth: python-jose, PyJWT, bcrypt, passlib
+# - Unused utilities: python-dateutil, PyYAML, orjson, tqdm, tenacity, regex
+# - Unused database: SQLAlchemy, greenlet
+# - Unused rate limiting: slowapi, limits
+# - Unused logging: structlog
+# - Potentially unused HTTP: requests, aiohttp (removed - not directly used, httpx used transitively)
