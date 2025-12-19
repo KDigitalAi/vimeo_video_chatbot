@@ -93,20 +93,8 @@ def get_logger():
 logger = get_logger()
 
 # Advanced memory management with O(1) operations
-def cleanup_memory():
-    """Ultra-optimized memory cleanup with O(1) complexity."""
-    gc.collect()
-    _advanced_cache.clear()
-
-def log_memory_usage():
-    """Ultra-fast memory monitoring with O(1) complexity."""
-    try:
-        import psutil
-        process = psutil.Process()
-        memory_mb = process.memory_info().rss / 1024 / 1024
-        logger.info(f"Memory usage: {memory_mb:.2f} MB")
-    except ImportError:
-        pass
+# Note: cleanup_memory and log_memory_usage are imported from backend.modules.utils
+from backend.modules.utils import cleanup_memory, log_memory_usage
 
 # Ultra-optimized FastAPI app creation
 @lru_cache(maxsize=1)
@@ -514,7 +502,7 @@ async def startup_event():
     
     # Advanced memory optimization on startup
     cleanup_memory()
-    log_memory_usage()
+    log_memory_usage("application startup")
 
 # Ultra-optimized shutdown event with O(1) complexity
 @app.on_event("shutdown")

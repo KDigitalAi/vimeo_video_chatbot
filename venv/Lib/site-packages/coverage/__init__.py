@@ -1,5 +1,5 @@
 # Licensed under the Apache License: http://www.apache.org/licenses/LICENSE-2.0
-# For details: https://github.com/nedbat/coveragepy/blob/master/NOTICE.txt
+# For details: https://github.com/coveragepy/coveragepy/blob/main/NOTICE.txt
 
 """
 Code coverage measurement for Python.
@@ -10,8 +10,6 @@ https://coverage.readthedocs.io
 """
 
 from __future__ import annotations
-
-# isort: skip_file
 
 # mypy's convention is that "import as" names are public from the module.
 # We import names as themselves to indicate that. Pylint sees it as pointless,

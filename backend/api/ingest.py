@@ -17,7 +17,6 @@ from backend.modules.whisper_transcriber import transcribe_vimeo_audio
 from backend.modules.utils import logger, log_memory_usage, cleanup_memory, check_memory_threshold
 from backend.core.validation import VideoIngestRequest, VideoIngestResponse
 from backend.core.settings import settings
-from backend.core.security import get_current_user, HTTPAuthorizationCredentials
 
 router = APIRouter()
 
@@ -26,7 +25,6 @@ router = APIRouter()
 async def ingest_video(
     video_id: str, 
     request: VideoIngestRequest,
-    credentials: HTTPAuthorizationCredentials = None
 ):
     """
     Ingests a Vimeo video by ID with enhanced security and validation.
@@ -43,7 +41,6 @@ async def ingest_video(
     Args:
         video_id: Vimeo video ID (validated)
         request: Validated ingestion request
-        credentials: JWT authentication credentials (optional)
         
     Returns:
         VideoIngestResponse with processing results
@@ -60,9 +57,6 @@ async def ingest_video(
         cleanup_memory()
     
     try:
-        # Note: VideoIngestRequest doesn't have video_id field, it's in the URL path
-        
-        
         # Step 1: Optimized duplicate check - O(1) database lookup
         if not request.force_transcription and check_duplicate_video(video_id):
             logger.info("Video %s already exists in database", video_id)
@@ -148,7 +142,8 @@ async def ingest_video(
         # Step 8: Optimized chunking - O(t) where t is transcript length
         try:
             chunks = make_chunks_with_metadata(segments, video_id, video_title)
-            logger.info("Created %d chunks for video %s", len(chunks), video_id)
+            chunk_count = len(chunks)
+            logger.info("Created %d chunks for video %s", chunk_count, video_id)
             log_memory_usage(f"chunks created for {video_id}")
             
             # Clean up segments immediately to reduce memory usage
@@ -184,7 +179,7 @@ async def ingest_video(
         return VideoIngestResponse(
             video_id=video_id,
             video_title=video_title,
-            chunk_count=len(chunks),
+            chunk_count=chunk_count,
             message="Ingestion completed and embeddings uploaded to Supabase.",
             processing_time=round(processing_time, 3),
             transcription_method=transcription_method

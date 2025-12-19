@@ -5,8 +5,7 @@ Implements JWT authentication and comprehensive input validation.
 """
 import time
 import uuid
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.security import HTTPBearer
+from fastapi import APIRouter, HTTPException, status
 from backend.modules.vector_store import load_supabase_vectorstore
 from backend.modules.retriever_chain import get_conversational_chain
 from backend.modules.chat_history_manager import (
@@ -18,13 +17,9 @@ from backend.modules.chat_history_manager import (
 )
 from backend.modules.utils import logger
 from backend.core.validation import ChatRequest, ChatResponse, ErrorResponse
-from backend.core.security import security_manager, get_current_user, check_rate_limit
-from backend.modules.utils import logger
-from backend.core.security import security_manager, get_current_user, check_rate_limit
 from backend.core.settings import settings
 
 router = APIRouter()
-security = HTTPBearer(auto_error=False)  # Make authentication optional for now
 
 # Global dictionary to store conversation chains per session
 _conversation_chains = {}
@@ -376,7 +371,6 @@ Topic Context (may be empty): {topic_context}
 @router.post("/query", response_model=ChatResponse)
 async def query_chat(
     request_data: dict,
-    # credentials: HTTPAuthorizationCredentials = Depends(security)  # Uncomment when auth is needed
 ):
     """
     Process chat query with enhanced security and validation.
@@ -409,12 +403,6 @@ async def query_chat(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Request validation failed: {str(e)}"
             )
-        # Rate limiting check
-        # if not check_rate_limit(request):
-        #     raise HTTPException(
-        #         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        #         detail="Rate limit exceeded"
-        #     )
         
         # Check if this is a greeting message
         greeting_keywords = [

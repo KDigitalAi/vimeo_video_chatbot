@@ -1,6 +1,14 @@
 # Exclude large/local-only artifacts to keep Serverless Function < 250MB
 # Keep backend/ and required source files INCLUDED
 
+# Environment variables (NEVER deploy secrets)
+.env
+.env.*
+.env.local
+.env.development
+.env.staging
+.env.production
+
 # Python virtual envs
 venv/
 .venv/
@@ -37,10 +45,15 @@ docs/
 # Python caches
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 .pytest_cache/
 .coverage
 coverage.xml
+*.cover
+.hypothesis/
 
 # Local helper scripts not needed in serverless bundle
 serve_frontend.py
-auto_update_embeddings.py
+scripts/

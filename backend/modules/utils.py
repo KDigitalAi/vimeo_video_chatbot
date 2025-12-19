@@ -65,9 +65,6 @@ def get_logger():
 # Use singleton logger
 logger = get_logger()
 
-def safe_get(d, key, default=None):
-    return d.get(key, default) if isinstance(d, dict) else default
-
 @lru_cache(maxsize=128)
 def get_memory_usage():
     """Get current memory usage in MB."""

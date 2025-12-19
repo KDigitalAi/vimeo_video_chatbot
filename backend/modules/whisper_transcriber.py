@@ -13,9 +13,6 @@ def _get_required_imports():
     import yt_dlp
     return AudioSegment, OpenAI(api_key=settings.OPENAI_API_KEY), yt_dlp
 
-# Remove global client to reduce memory usage
-# client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
 def download_vimeo_audio_with_ytdlp(video_id: str) -> str:
     """
     Download audio from Vimeo video using yt-dlp as fallback.
