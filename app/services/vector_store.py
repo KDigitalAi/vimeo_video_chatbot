@@ -82,9 +82,18 @@ class SupabaseVectorStore:
             # This prevents loading all embeddings into memory
             fetch_limit = min(k * 3, 1000)  # Cap at 1000 for safety
             pdf_rows = self._supabase.table("pdf_embeddings").select("*").limit(fetch_limit).execute().data or []
+            
+            # Log how many rows were fetched for debugging
+            if not pdf_rows:
+                logger.warning(f"No PDF embeddings found in database (limit: {fetch_limit})")
+            else:
+                logger.info(f"Fetched {len(pdf_rows)} PDF embedding rows from database")
+            
+            embedding_dimension_mismatches = 0
             for row in pdf_rows:
                 emb = _parse_embedding(row.get("embedding"))
                 if not emb or len(emb) != len(query_embedding):
+                    embedding_dimension_mismatches += 1
                     continue
                 score = _cosine_similarity(query_embedding, emb)
                 doc = _SimpleDocument(
@@ -98,6 +107,19 @@ class SupabaseVectorStore:
                     },
                 )
                 results.append((doc, score))
+            
+            # Log similarity computation results
+            if embedding_dimension_mismatches > 0:
+                logger.warning(f"Skipped {embedding_dimension_mismatches} rows due to embedding dimension mismatch")
+            
+            if results:
+                scores = [s for _, s in results]
+                logger.info(
+                    f"Computed {len(results)} similarity scores. "
+                    f"Range: {min(scores):.3f} - {max(scores):.3f}"
+                )
+            else:
+                logger.warning("No similarity scores computed - all rows filtered or no matches")
         except Exception as e:
             # Log error but don't crash - return empty results instead
             logger.error(f"Failed to query PDF embeddings: {e}")

@@ -1,6 +1,6 @@
 # 📚 PDF Knowledge Chatbot
 
-A modern, RAG-powered chatbot for querying PDF documents using OpenAI embeddings and LangChain. Built with FastAPI backend, optimized for serverless deployment on Vercel.
+A production-ready, RAG-powered chatbot for querying PDF documents using OpenAI embeddings and LangChain. Built with FastAPI backend, optimized for serverless deployment on Vercel.
 
 ## 🎯 Project Overview
 
@@ -21,30 +21,35 @@ The **PDF Knowledge Chatbot** is a Retrieval-Augmented Generation (RAG) applicat
 ### PDF Ingestion
 - **Single Upload**: Upload individual PDF files via API
 - **Batch Upload**: Process multiple PDFs in a single request
-- **Duplicate Detection**: Automatically detects and skips already-processed PDFs
+- **Duplicate Detection**: Automatically detects and skips already-processed PDFs using content hash
 - **Force Reprocessing**: Option to reprocess existing PDFs
+- **Metadata Extraction**: Preserves PDF title, page numbers, and chunk IDs
 
 ### Text Processing & Embeddings
 - **Intelligent Chunking**: Splits PDFs into optimal-sized chunks (1000 chars, 200 overlap)
-- **OpenAI Embeddings**: Uses `text-embedding-3-small` for vector generation
-- **Metadata Preservation**: Maintains PDF title, page numbers, and chunk IDs
+- **OpenAI Embeddings**: Uses `text-embedding-3-small` (1536 dimensions) for vector generation
+- **Content Cleaning**: Normalizes whitespace and preserves structure
+- **Memory Management**: Automatic memory cleanup for serverless environments
 
-### Vector Search
+### Vector Search & RAG
 - **Supabase + pgvector**: PostgreSQL with vector extension for similarity search
-- **Cosine Similarity**: Efficient vector similarity search
-- **Relevance Scoring**: Returns results with relevance scores
-- **Top-K Retrieval**: Configurable number of results (default: 10)
+- **Cosine Similarity**: Efficient vector similarity search with IVFFlat indexing
+- **Dynamic Thresholds**: Multi-tier relevance filtering (High: 0.5, Low: 0.4, Minimum: 0.2, Absolute: 0.15)
+- **Context Expansion**: Automatically includes related chunks from same PDF
+- **Relevance Scoring**: Returns results with similarity scores
 
 ### Conversational Chat
-- **Context-Aware Responses**: Uses LangChain for conversational memory
+- **Context-Aware Responses**: Uses LangChain ConversationalRetrievalChain for memory
 - **Session Management**: Tracks conversations by user and session ID
-- **Source Attribution**: Returns source documents with responses
+- **Source Attribution**: Returns source documents with page numbers and relevance scores
 - **Chat History**: Stores and retrieves conversation history
+- **Follow-up Detection**: Automatically detects and handles follow-up questions
 
 ### API Documentation
 - **Swagger UI**: Interactive API documentation at `/docs` (development only)
-- **OpenAPI Schema**: Standard OpenAPI 3.1 specification
-- **ReDoc**: Alternative documentation interface at `/redoc`
+- **OpenAPI Schema**: Standard OpenAPI 3.1 specification at `/openapi.json`
+- **ReDoc**: Alternative documentation interface at `/redoc` (development only)
+- **Auto-disabled in Production**: Swagger UI automatically disabled when `ENVIRONMENT=production`
 
 ---
 
@@ -54,25 +59,27 @@ The **PDF Knowledge Chatbot** is a Retrieval-Augmented Generation (RAG) applicat
 - **FastAPI** (0.121.1): Modern Python web framework with automatic API documentation
 - **Uvicorn** (0.38.0): ASGI server for production deployment
 - **Starlette** (0.49.3): Lightweight ASGI framework (FastAPI dependency)
+- **Pydantic** (2.8.2): Data validation and settings management
 
 ### Database & Vector Search
 - **Supabase PostgreSQL**: Managed PostgreSQL database
 - **pgvector**: PostgreSQL extension for vector similarity search
-- **PostgREST** (0.16.11): RESTful API for PostgreSQL
+- **PostgREST** (0.16.11): RESTful API for PostgreSQL (via Supabase client)
 
 ### AI/ML
 - **OpenAI** (1.50.0): GPT-3.5-turbo for chat, text-embedding-3-small for embeddings
 - **LangChain** (0.3.1): Framework for building LLM applications
 - **LangChain OpenAI** (0.2.0): OpenAI integration for LangChain
+- **LangChain Core** (0.3.63): Core LangChain functionality
 
 ### PDF Processing
 - **PyPDF2** (3.0.1): PDF text extraction
 - **PyMuPDF** (1.26.6): Advanced PDF processing and metadata extraction
 
 ### Utilities
-- **Pydantic** (2.8.2): Data validation and settings management
 - **python-dotenv** (1.0.1): Environment variable management
-- **NumPy** (1.26.4): Numerical operations for embeddings
+- **NumPy** (1.26.4): Numerical operations for embeddings and cosine similarity
+- **python-multipart** (0.0.6): File upload handling
 
 ### Deployment
 - **Vercel**: Serverless function deployment
@@ -86,12 +93,12 @@ The **PDF Knowledge Chatbot** is a Retrieval-Augmented Generation (RAG) applicat
 vimeo_video_chatbot/
 ├── app/                              # FastAPI backend application
 │   ├── __init__.py                   # Package initialization
-│   ├── main.py                       # FastAPI app entry point & router registration
+│   ├── main.py                       # FastAPI app entry point, router registration, middleware
 │   │
 │   ├── api/                          # API route handlers
 │   │   └── routes/
-│   │       ├── chat.py               # Chat query endpoints (POST /chat/query, GET /chat/history, etc.)
-│   │       └── pdf_ingest.py         # PDF ingestion endpoints (POST /pdf/upload, GET /pdf/list, etc.)
+│   │       ├── chat.py               # Chat endpoints (POST /chat/query, history, sessions)
+│   │       └── pdf_ingest.py          # PDF ingestion endpoints (upload, list, delete)
 │   │
 │   ├── config/                       # Configuration management
 │   │   ├── settings.py               # Environment settings & validation (Pydantic)
@@ -109,9 +116,9 @@ vimeo_video_chatbot/
 │   │
 │   ├── services/                     # Business logic services
 │   │   ├── chat_history_manager.py  # Chat storage & retrieval
-│   │   ├── embedding_manager.py      # OpenAI embeddings wrapper
+│   │   ├── embedding_manager.py      # OpenAI embeddings wrapper (cached)
 │   │   ├── pdf_ingestion.py          # PDF ingestion pipeline (shared service)
-│   │   ├── pdf_processor.py         # PDF text extraction & processing
+│   │   ├── pdf_processor.py          # PDF text extraction & processing
 │   │   ├── pdf_store.py              # PDF embeddings storage operations
 │   │   ├── retriever_chain.py        # LangChain conversation chain
 │   │   ├── text_processor.py         # Text chunking utilities
@@ -125,19 +132,16 @@ vimeo_video_chatbot/
 │   └── index.py                      # Vercel function handler
 │
 ├── scripts/                          # Utility scripts
-│   └── auto_update_embeddings.py     # Background script for batch PDF processing
+│   └── auto_update_embeddings.py    # Background script for batch PDF processing
 │
 ├── tests/                            # Test directory
 │   ├── unit/                         # Unit tests
-│   └── integration/                 # Integration tests
-│
-├── uploads/                          # File uploads (local development)
-│   └── pdfs/                         # PDF uploads directory
+│   └── integration/                  # Integration tests
 │
 ├── requirements.txt                  # Python dependencies
-├── runtime.txt                      # Python version (3.12)
+├── runtime.txt                       # Python version (3.12)
 ├── vercel.json                       # Vercel deployment configuration
-├── .vercelignore                     # Files to exclude from Vercel deployment
+├── test_chat.py                      # Simple test script for chat endpoint
 └── README.md                         # This file
 ```
 
@@ -151,6 +155,7 @@ vimeo_video_chatbot/
 - **`app/config/settings.py`**: Environment configuration and validation
 - **`app/services/pdf_ingestion.py`**: Centralized PDF ingestion pipeline
 - **`app/services/vector_store.py`**: Vector similarity search implementation
+- **`app/api/routes/chat.py`**: Chat query logic with RAG workflow
 - **`app/database/migrations.sql`**: Database schema and indexes
 
 ---
@@ -164,11 +169,11 @@ vimeo_video_chatbot/
    ↓
 2. File validation (PDF format, size < 50MB)
    ↓
-3. Generate PDF ID from content hash
+3. Generate PDF ID from content hash (MD5, first 12 chars)
    ↓
-4. Check for duplicates in Supabase
+4. Check for duplicates in Supabase pdf_embeddings table
    ↓
-5. Extract text from PDF (PyPDF2/PyMuPDF)
+5. Extract text from PDF (PyPDF2/PyMuPDF fallback)
    ↓
 6. Split text into chunks (1000 chars, 200 overlap)
    ↓
@@ -179,32 +184,48 @@ vimeo_video_chatbot/
 9. Return processing results (chunks processed, embeddings stored)
 ```
 
-### Chat Query Processing Flow
+### Chat Query / RAG Workflow
 
 ```
 1. User sends query via POST /chat/query
    ↓
 2. Generate query embedding (OpenAI text-embedding-3-small)
    ↓
-3. Vector similarity search in pdf_embeddings table (pgvector cosine similarity)
+3. Vector similarity search in pdf_embeddings table
+   - Fetches up to k*3 rows (max 1000)
+   - Computes cosine similarity for each
+   - Sorts by relevance score
+   - Returns top-k results
    ↓
-4. Retrieve top-K relevant chunks with relevance scores
+4. Threshold filtering (multi-tier):
+   - High confidence (≥0.5): Use directly
+   - Low confidence (0.4-0.49): Use if no high confidence
+   - Minimum (0.2-0.39): Use best document if exists
+   - Absolute minimum (≥0.15): Use best document even if below minimum
    ↓
-5. Load conversation chain (LangChain with GPT-3.5-turbo)
+5. PDF expansion: Include related chunks from same PDF
    ↓
-6. Generate response using retrieved context
+6. Context merging: Clean and merge content from retrieved documents
    ↓
-7. Store interaction in chat_history table
+7. Decision logic:
+   - If no documents: Return fallback message
+   - If documents exist: Always call LLM (even if context is empty)
    ↓
-8. Store query in user_queries table
+8. Generate response:
+   - Use LangChain ConversationalRetrievalChain for context-aware responses
+   - Or use clarification response for low-confidence matches
    ↓
-9. Return response with sources and metadata
+9. Store interaction in chat_history table
+   ↓
+10. Store query in user_queries table
+   ↓
+11. Return response with sources and metadata
 ```
 
 ### Text Chunking Strategy
 
-- **Chunk Size**: 1000 characters (configurable via `CHUNK_SIZE`)
-- **Chunk Overlap**: 200 characters (configurable via `CHUNK_OVERLAP`)
+- **Chunk Size**: 1000 characters (configurable via `CHUNK_SIZE` env var)
+- **Chunk Overlap**: 200 characters (configurable via `CHUNK_OVERLAP` env var)
 - **Metadata**: Preserves PDF title, page number, chunk ID
 - **Purpose**: Optimizes retrieval by balancing context size and granularity
 
@@ -213,11 +234,26 @@ vimeo_video_chatbot/
 - **Table**: `pdf_embeddings` in Supabase PostgreSQL
 - **Vector Dimension**: 1536 (OpenAI text-embedding-3-small)
 - **Index**: IVFFlat index on embedding column for fast similarity search
-- **Metadata**: PDF ID, title, page number, chunk ID, source type
+- **Metadata**: PDF ID, title, page number, chunk ID, source type, folder
+
+### Similarity Thresholds
+
+The system uses a multi-tier threshold system to prevent false negatives:
+
+- **HIGH_CONFIDENCE_THRESHOLD** (0.5): High-quality matches, used directly
+- **LOW_CONFIDENCE_THRESHOLD** (0.4): Moderate matches, used if no high-confidence results
+- **MINIMUM_THRESHOLD** (0.2): Lower threshold to catch more relevant matches
+- **ABSOLUTE_MINIMUM** (0.15): Absolute minimum - best document is used even if below minimum
+
+**Why these thresholds?**
+- `text-embedding-3-small` can produce lower similarity scores for valid matches
+- Domain-specific or technical content may have lower scores but still be relevant
+- The system prioritizes document presence over strict similarity scores
+- Empty context (from content filtering) does NOT mean no documents exist
 
 ---
 
-## 📡 API Overview
+## 📡 API Documentation
 
 ### Base URL
 
@@ -254,11 +290,13 @@ vimeo_video_chatbot/
 - **Request Body**:
   ```json
   {
-    "query": "What is Python?",
-    "user_id": "user123",
-    "conversation_id": "conv456",
-    "top_k": 5,
-    "include_sources": true
+    "request": {
+      "query": "What is Python?",
+      "user_id": "user123",
+      "conversation_id": "conv456",
+      "top_k": 5,
+      "include_sources": true
+    }
   }
   ```
 - **Response**:
@@ -267,15 +305,18 @@ vimeo_video_chatbot/
     "answer": "Python is a programming language...",
     "sources": [
       {
+        "source_type": "pdf",
         "pdf_title": "Python Guide",
         "pdf_id": "pdf_abc123",
         "page_number": 1,
         "chunk_id": "0",
-        "relevance_score": 0.95
+        "relevance_score": 0.85,
+        "source_name": "Python Guide"
       }
     ],
     "conversation_id": "conv456",
-    "processing_time": 1.234
+    "processing_time": 1.234,
+    "tokens_used": null
   }
   ```
 
@@ -353,9 +394,6 @@ vimeo_video_chatbot/
 - Shows router registration status
 - Lists all registered routers and their status
 
-**GET `/_logs`**
-- Returns log information (if available)
-
 ---
 
 ## 🔐 Environment Variables
@@ -409,6 +447,7 @@ VALIDATE_CONFIG=false                     # Set to true to validate config on st
 - Use different API keys for development and production
 - In production, set `ENVIRONMENT=production` to disable Swagger UI
 - The `SUPABASE_SERVICE_KEY` should have full database access (service role key)
+- OpenAI API key must start with `sk-`
 
 ---
 
@@ -475,6 +514,7 @@ This creates:
 - `user_queries` table for query tracking
 - Indexes for performance optimization
 - RPC functions for vector search
+- pgvector extension
 
 #### 6. Start the Server
 
@@ -534,9 +574,11 @@ POST /chat/query
 Request Body:
 ```json
 {
-  "query": "What topics are covered in the PDF?",
-  "user_id": "test_user",
-  "include_sources": true
+  "request": {
+    "query": "What topics are covered in the PDF?",
+    "user_id": "test_user",
+    "include_sources": true
+  }
 }
 ```
 Expected: Response with answer and source documents
@@ -566,100 +608,229 @@ curl -X POST "http://127.0.0.1:8000/pdf/upload" \
 curl -X POST "http://127.0.0.1:8000/chat/query" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "What is Python?",
-    "user_id": "test_user",
-    "include_sources": true
+    "request": {
+      "query": "What is Python?",
+      "user_id": "test_user",
+      "include_sources": true
+    }
   }'
 ```
 
-### Common Troubleshooting
+### Testing with Python
 
-**1. Import Errors**
+Create a `test_chat.py` file:
+
+```python
+import requests
+import json
+
+def test_chat(query):
+    url = "http://127.0.0.1:8000/chat/query"
+    payload = {
+        "request": {
+            "query": query,
+            "user_id": "test_user",
+            "include_sources": True
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        
+        print(f"Query: {query}")
+        print(f"Answer: {result.get('answer', 'No answer')}")
+        print(f"Sources: {len(result.get('sources', []))} sources found")
+        print(f"Processing time: {result.get('processing_time', 0)}s")
+        print("-" * 50)
+        
+        return result
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+# Test queries
+test_chat("Hello")
+test_chat("What is Python?")
+test_chat("Explain variables")
+```
+
+Run it:
+```bash
+python test_chat.py
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+#### 1. Import Errors
+
+**Symptoms**: `ModuleNotFoundError` or import failures
+
+**Solutions**:
 ```bash
 # Verify all dependencies installed
 pip install -r requirements.txt
 
 # Check Python version
 python --version  # Should be 3.12+
+
+# Reinstall dependencies
+pip install --upgrade -r requirements.txt
 ```
 
-**2. Database Connection Issues**
-```bash
-# Test Supabase connection
-python -c "from app.database.supabase import test_connection; test_connection()"
+#### 2. Database Connection Issues
 
+**Symptoms**: `Failed to connect to Supabase` or `Vector store unavailable`
+
+**Solutions**:
+```bash
 # Verify environment variables
 echo $SUPABASE_URL
 echo $SUPABASE_SERVICE_KEY
+
+# Test Supabase connection
+python -c "from app.database.supabase import get_supabase; supabase = get_supabase(); print('Connected:', supabase is not None)"
+
+# Check if pgvector extension is installed
+# Run in Supabase SQL Editor:
+# SELECT * FROM pg_extension WHERE extname = 'vector';
 ```
 
-**3. OpenAI API Errors**
+#### 3. OpenAI API Errors
+
+**Symptoms**: `OpenAI API key is invalid` or `401 Unauthorized`
+
+**Solutions**:
 ```bash
 # Verify API key format
 echo $OPENAI_API_KEY | head -c 10  # Should start with 'sk-'
 
 # Test API connection
 python -c "from openai import OpenAI; client = OpenAI(); print('API works:', client.models.list().data[0].id)"
+
+# Check API key in .env file
+# Ensure no extra spaces or quotes
 ```
 
-**4. PDF Processing Errors**
+#### 4. PDF Processing Errors
+
+**Symptoms**: `Failed to process PDF` or `No text extracted`
+
+**Solutions**:
 ```bash
 # Verify PDF libraries installed
 python -c "import PyPDF2; import fitz; print('PDF libraries OK')"
 
 # Check file size (max 50MB)
 ls -lh document.pdf
+
+# Test PDF processing
+python -c "from app.services.pdf_processor import process_pdf_file; result = process_pdf_file('test.pdf'); print('Processed:', result)"
 ```
 
-**5. Vector Search Not Working**
+#### 5. Vector Search Not Working
+
+**Symptoms**: Always returns "Sorry, I don't have this information"
+
+**Solutions**:
 ```bash
 # Check if embeddings exist
 python -c "from app.database.supabase import get_supabase; supabase = get_supabase(); result = supabase.table('pdf_embeddings').select('*').limit(1).execute(); print('Embeddings exist:', len(result.data))"
 
-# Verify pgvector extension
-python -c "from app.database.supabase import get_supabase; supabase = get_supabase(); result = supabase.rpc('exec_sql', {'sql': \"SELECT * FROM pg_extension WHERE extname = 'vector'\"}).execute(); print('pgvector installed:', len(result.data))"
+# Check similarity scores in logs (development mode)
+# Look for: "Retrieved X documents. Score range: min=X, max=Y"
+
+# Verify threshold settings
+# Check logs for: "After threshold filtering: X relevant docs"
 ```
 
-**6. Swagger UI Not Loading**
+#### 6. Swagger UI Not Loading
+
+**Symptoms**: 404 on `/docs` endpoint
+
+**Solutions**:
 - Verify `ENVIRONMENT=development` in `.env`
 - Check that server is running on correct port
 - Try accessing `/openapi.json` directly
+- In production, Swagger UI is intentionally disabled
+
+#### 7. False "No Information" Responses
+
+**Symptoms**: PDFs are uploaded but queries return "Sorry, I don't have this information"
+
+**Possible Causes**:
+1. **Threshold too strict**: Similarity scores below 0.15
+2. **No embeddings stored**: Check database for embeddings
+3. **Content filtering**: All content filtered out during merging
+4. **Vector store error**: Check logs for vector store errors
+
+**Solutions**:
+```bash
+# Check logs for similarity scores
+# Look for: "Retrieved X documents. Score range: min=X, max=Y"
+
+# Verify embeddings exist
+# Check Supabase dashboard: pdf_embeddings table
+
+# Check threshold logic
+# System uses: HIGH (0.5), LOW (0.4), MINIMUM (0.2), ABSOLUTE_MINIMUM (0.15)
+
+# Enable development logging
+# Set ENVIRONMENT=development in .env
+```
+
+### Debugging Tips
+
+1. **Enable Development Logging**: Set `ENVIRONMENT=development` in `.env`
+2. **Check Server Logs**: Look for similarity scores, filtering decisions, and errors
+3. **Use Health Endpoints**: `/health/detailed` shows service status
+4. **Test Vector Search Directly**: Use Supabase SQL editor to test similarity search
+5. **Check Embedding Dimensions**: Ensure query and document embeddings are both 1536 dimensions
 
 ---
 
-## 🚢 Production Notes
+## 🚢 Production Deployment
 
-### Swagger UI Behavior
-
-Swagger UI is **automatically disabled** in production for security:
-
-- **Development** (`ENVIRONMENT=development`): Swagger UI available at `/docs`
-- **Production** (`ENVIRONMENT=production`): Swagger UI returns 404
-
-This is controlled in `app/main.py`:
-```python
-docs_url = "/docs" if not is_production else None
-```
-
-### Serverless Considerations
-
-#### Vercel Deployment
+### Vercel Deployment
 
 The application is optimized for Vercel serverless functions:
 
-- **Read-only file system**: All file writes go to `/tmp` (if needed)
-- **Cold starts**: Imports are wrapped in try/except to prevent failures
-- **Memory limits**: PDF processing includes memory cleanup
-- **Timeout limits**: Batch processing optimized for serverless timeouts
+1. **Connect Repository**: Link your GitHub repository to Vercel
+2. **Configure Environment Variables**: Set all required variables in Vercel Dashboard
+3. **Set Production Environment**: `ENVIRONMENT=production` (disables Swagger UI)
+4. **Deploy**: Vercel automatically detects `vercel.json` and deploys
 
-#### Environment Variables in Production
+### Serverless Considerations
+
+#### Cold Starts
+- Imports are wrapped in try/except to prevent failures
+- Settings are loaded lazily to reduce initialization time
+- Vector store is cached globally to reduce connection overhead
+
+#### Memory Limits
+- PDF processing includes automatic memory cleanup
+- Large PDFs are processed in chunks
+- Memory usage is logged in development mode
+
+#### Timeout Limits
+- Batch processing is optimized for serverless timeouts
+- Single PDF uploads should complete within timeout
+- Chat queries are optimized for fast responses
+
+### Environment Variables in Production
 
 Set environment variables in Vercel Dashboard:
 1. Go to Project Settings → Environment Variables
 2. Add all required variables (see Environment Variables section)
 3. Set `ENVIRONMENT=production` to disable Swagger UI
+4. Use production API keys (different from development)
 
-#### Bundle Size Optimization
+### Bundle Size Optimization
 
 The `.vercelignore` file excludes:
 - Virtual environments (`venv/`, `.venv/`)
@@ -672,19 +843,16 @@ This keeps the serverless bundle under 250MB.
 ### Scaling Notes
 
 #### Database Performance
-
 - **Indexes**: Already created on `pdf_embeddings` table for fast vector search
 - **Connection Pooling**: Consider using Supabase connection pooling for high traffic
 - **Query Optimization**: Vector search uses IVFFlat index for efficient similarity search
 
 #### API Performance
-
 - **Rate Limiting**: Configured via `RATE_LIMIT_PER_MINUTE` (default: 60)
 - **Memory Management**: PDF processing includes automatic memory cleanup
 - **Batch Processing**: Optimized for processing multiple PDFs efficiently
 
 #### Monitoring
-
 - **Health Endpoints**: Use `/health` and `/health/detailed` for monitoring
 - **Logging**: All logs go to stdout (Vercel automatically captures)
 - **Error Tracking**: Consider integrating Sentry or similar for production
@@ -696,6 +864,7 @@ This keeps the serverless bundle under 250MB.
 3. **Rate Limiting**: Adjust `RATE_LIMIT_PER_MINUTE` based on usage
 4. **Database Security**: Use Row Level Security (RLS) in Supabase
 5. **Input Validation**: All inputs are validated via Pydantic models
+6. **Swagger UI**: Automatically disabled in production
 
 ---
 
@@ -713,6 +882,7 @@ CREATE TABLE pdf_embeddings (
     pdf_title TEXT,
     chunk_id TEXT,
     page_number INTEGER,
+    folder TEXT,
     source_type TEXT DEFAULT 'pdf',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -726,7 +896,6 @@ CREATE TABLE chat_history (
     session_id TEXT,
     user_message TEXT NOT NULL,
     bot_response TEXT,
-    video_id TEXT,  -- Deprecated, kept for compatibility
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
@@ -738,7 +907,6 @@ CREATE TABLE user_queries (
     user_id TEXT,
     query_text TEXT NOT NULL,
     query_embedding vector(1536),
-    matched_video_id TEXT,  -- Deprecated, kept for compatibility
     matched_chunk_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -748,8 +916,15 @@ CREATE TABLE user_queries (
 
 - **Vector Index**: IVFFlat index on `pdf_embeddings.embedding` for fast similarity search
 - **PDF ID Index**: Index on `pdf_embeddings.pdf_id` for quick PDF lookups
+- **Source Type Index**: Index on `pdf_embeddings.source_type` for filtering
 - **User Index**: Index on `chat_history.user_id` for fast history retrieval
 - **Timestamp Index**: Index on `created_at` for chronological queries
+
+### Functions
+
+- **match_pdf_embeddings**: Vector similarity search function
+- **get_pdf_documents**: List all PDF documents
+- **delete_pdf_document**: Delete PDF and all embeddings
 
 ---
 
@@ -776,7 +951,68 @@ python scripts/auto_update_embeddings.py
 
 ---
 
-## 📝 License
+## 📝 Logging and Debugging
+
+### Development Logging
+
+When `ENVIRONMENT=development`, the system logs:
+- Similarity scores (min, max, avg)
+- Number of documents retrieved
+- Threshold filtering decisions
+- Context length after merging
+- Vector store operations
+- Memory usage
+
+### Log Locations
+
+- **Local Development**: Console output (stdout)
+- **Vercel Production**: Vercel Dashboard → Logs
+- **Background Scripts**: `scripts/auto_update.log`
+
+### Debugging Tips
+
+1. **Check Similarity Scores**: Look for "Retrieved X documents. Score range: min=X, max=Y"
+2. **Verify Threshold Filtering**: Check "After threshold filtering: X relevant docs"
+3. **Monitor Memory**: Look for memory usage warnings
+4. **Check Vector Store**: Verify "Fetched X PDF embedding rows from database"
+5. **Review Error Logs**: Check for exceptions and tracebacks
+
+---
+
+## ⚠️ Limitations and Known Constraints
+
+### Current Limitations
+
+1. **PDF Size**: Maximum 50MB per PDF file
+2. **Chunk Size**: Fixed at 1000 characters (configurable via env var)
+3. **Vector Dimension**: Fixed at 1536 (text-embedding-3-small)
+4. **Similarity Thresholds**: Hardcoded in code (can be adjusted)
+5. **Memory**: Serverless memory limits apply
+6. **Timeout**: Serverless timeout limits apply (Vercel: 60s for Pro, 10s for Hobby)
+
+### Known Constraints
+
+1. **PDF-only Mode**: System only supports PDF documents (video support removed)
+2. **Single Embedding Model**: Only supports text-embedding-3-small
+3. **Single LLM Model**: Only supports gpt-3.5-turbo
+4. **No Authentication**: API endpoints are not protected (add authentication for production)
+5. **No Rate Limiting**: Rate limiting middleware exists but may need tuning
+
+### Future Improvements
+
+- [ ] Support for multiple embedding models
+- [ ] Support for multiple LLM models (GPT-4, Claude, etc.)
+- [ ] Authentication and authorization
+- [ ] Advanced rate limiting
+- [ ] Streaming responses
+- [ ] WebSocket support for real-time chat
+- [ ] PDF OCR for scanned documents
+- [ ] Multi-language support
+- [ ] Advanced analytics and monitoring
+
+---
+
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 

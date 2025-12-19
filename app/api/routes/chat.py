@@ -199,6 +199,15 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
     """
     Merge and clean content from multiple documents for comprehensive educational presentation.
     Groups content by topic and source for better organization and completeness.
+    
+    IMPORTANT: This function may return an empty string even when relevant_docs is not empty.
+    This can happen if:
+    - All content is filtered out due to being empty/whitespace
+    - Content cleaning removes all text
+    - All documents have non-PDF source_type (shouldn't happen in PDF-only mode)
+    
+    Callers MUST check relevant_docs existence, NOT this return value, to determine
+    if documents were retrieved. Empty context ≠ no knowledge in PDF-based RAG systems.
     """
     # Group documents by source and organize by relevance (PDF-only mode)
     pdf_content = []
@@ -808,9 +817,22 @@ async def _query_chat_handler(request_data: dict):
                 logger.info("Found %d relevant documents", len(docs_with_scores))
             
             # Implement dynamic threshold with fallback logic
+            # CRITICAL FIX: Lowered thresholds to prevent false negatives
+            # text-embedding-3-small can produce lower similarity scores for valid matches
+            # especially with domain-specific or technical content
             HIGH_CONFIDENCE_THRESHOLD = 0.5
             LOW_CONFIDENCE_THRESHOLD = 0.4
-            MINIMUM_THRESHOLD = 0.3  # Increased threshold to avoid irrelevant matches
+            MINIMUM_THRESHOLD = 0.2  # Lowered from 0.3 to catch more relevant matches
+            ABSOLUTE_MINIMUM = 0.15  # Absolute minimum - use best document even if below MINIMUM
+            
+            # Log similarity scores for debugging
+            if settings.is_development and docs_with_scores:
+                scores = [score for _, score in docs_with_scores]
+                logger.info(
+                    f"Retrieved {len(docs_with_scores)} documents. "
+                    f"Score range: min={min(scores):.3f}, max={max(scores):.3f}, "
+                    f"avg={sum(scores)/len(scores):.3f}"
+                )
             
             relevant_docs = []
             low_confidence_docs = []
@@ -821,13 +843,34 @@ async def _query_chat_handler(request_data: dict):
                 elif score >= LOW_CONFIDENCE_THRESHOLD:
                     low_confidence_docs.append((doc, score))
             
+            # Use low confidence docs if no high confidence ones
             if not relevant_docs and low_confidence_docs:
                 relevant_docs = low_confidence_docs[:3]
+                if settings.is_development:
+                    logger.info(f"Using {len(relevant_docs)} low-confidence documents (scores >= {LOW_CONFIDENCE_THRESHOLD})")
             
+            # FIXED: More lenient fallback - use best document even if below MINIMUM_THRESHOLD
+            # Previous bug: Required best_score >= MINIMUM_THRESHOLD, causing false negatives
+            # New logic: Use best document if it exists and score >= ABSOLUTE_MINIMUM
+            # This prevents total rejection when all scores are in 0.15-0.3 range
             if not relevant_docs and docs_with_scores:
                 best_score = max(score for _, score in docs_with_scores)
-                if best_score >= MINIMUM_THRESHOLD:
-                    relevant_docs = [(doc, score) for doc, score in docs_with_scores if score == best_score][:1]
+                if best_score >= ABSOLUTE_MINIMUM:
+                    # Use the best document(s) even if below MINIMUM_THRESHOLD
+                    # This prevents false negatives when all scores are in 0.15-0.3 range
+                    best_docs = [(doc, score) for doc, score in docs_with_scores if score == best_score]
+                    relevant_docs = best_docs[:3]  # Take up to 3 documents with best score
+                    if settings.is_development:
+                        logger.info(
+                            f"Using {len(relevant_docs)} document(s) with best score {best_score:.3f} "
+                            f"(below MINIMUM_THRESHOLD {MINIMUM_THRESHOLD} but >= ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
+                        )
+                else:
+                    if settings.is_development:
+                        logger.warning(
+                            f"No documents meet absolute minimum threshold. Best score: {best_score:.3f} "
+                            f"(below ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
+                        )
             
             # Enhanced PDF expansion for complete topic coverage
             if relevant_docs:
@@ -844,7 +887,7 @@ async def _query_chat_handler(request_data: dict):
                             md = getattr(doc, "metadata", {}) or {}
                             if (md.get("source_type") == "pdf" and 
                                 md.get("pdf_id") == pdf_id and 
-                                score >= (MINIMUM_THRESHOLD - 0.1)):  # Lower threshold for more content
+                                score >= (ABSOLUTE_MINIMUM)):  # Use absolute minimum for expansion
                                 additional_chunks.append((doc, score))
                         
                         if additional_chunks:
@@ -858,7 +901,36 @@ async def _query_chat_handler(request_data: dict):
                 # Video expansion logic removed - PDF-only mode
                 # Cross-source expansion removed - PDF-only mode
 
+            # Log filtering results before decision
+            if settings.is_development:
+                logger.info(
+                    f"After threshold filtering: {len(relevant_docs)} relevant docs, "
+                    f"{len(docs_with_scores)} total retrieved"
+                )
+                if relevant_docs:
+                    best_score_after_filter = max(score for _, score in relevant_docs)
+                    logger.info(f"Best score after filtering: {best_score_after_filter:.3f}")
+                elif docs_with_scores:
+                    best_score_all = max(score for _, score in docs_with_scores)
+                    logger.warning(
+                        f"All documents filtered out! Best score was {best_score_all:.3f} "
+                        f"(below ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
+                    )
+
+            # FIXED: Early exit only when truly no documents retrieved OR all scores below absolute minimum
+            # Previous bug: Exited early even when documents existed but were filtered by strict thresholds
+            # New logic: Only exit if vector search returned zero documents OR best score < ABSOLUTE_MINIMUM
             if not relevant_docs:
+                # Only fallback if truly no documents retrieved OR all scores too low
+                if settings.is_development:
+                    if docs_with_scores:
+                        best_score = max(score for _, score in docs_with_scores)
+                        logger.warning(
+                            f"Fallback triggered: {len(docs_with_scores)} documents retrieved but all filtered. "
+                            f"Best score: {best_score:.3f} (below ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
+                        )
+                    else:
+                        logger.warning("Fallback triggered: No documents retrieved from vector store")
                 answer = "Sorry, I don't have this information in the available study materials."
                 sources = []
             else:
@@ -922,12 +994,25 @@ This is a follow-up question. Stay on the SAME TOPIC as in the last topic contex
 Please provide a comprehensive, educational response using the course materials above. If the materials are partial, expand with accurate, topic-appropriate detail without contradicting them. Always structure the response into Explanation, Example, and Key Points."""
 
                     # Decide path based on retrieval strength and context richness
+                    # CRITICAL FIX: Check relevant_docs existence FIRST, not context length
+                    # Empty context can occur due to content filtering/cleaning, not lack of documents.
+                    # In PDF-based RAG, document presence must be prioritized over cleaned context.
+                    # The LLM can work with documents directly even if context merging produces empty string.
                     context_length = len(context or "")
-                    if best_score < MINIMUM_THRESHOLD or context_length == 0:
-                        # Unrelated or too weak: do not use LLM
-                        answer = "Sorry, I don’t have this information in the available study materials."
+                    
+                    # FIXED LOGIC: Only fallback if NO documents retrieved
+                    # Previous bug: checked context_length == 0 even when documents existed
+                    # This caused false negatives when content cleaning removed all text
+                    if not relevant_docs:
+                        # Truly no documents retrieved - legitimate fallback
+                        answer = "Sorry, I don't have this information in the available study materials."
+                    elif best_score < MINIMUM_THRESHOLD and context_length == 0:
+                        # Edge case: documents exist but score too low AND no usable content
+                        # This is rare but valid - documents are too irrelevant to use
+                        answer = "Sorry, I don't have this information in the available study materials."
                     elif context_length < 300 or is_low_confidence:
                         # Related but partial: expand with LLM and format
+                        # Documents exist and are relevant enough - use LLM
                         if is_clarification_request or is_follow_up:
                             raw_answer = _generate_clarification_response(request.query, relevant_docs)
                         else:
@@ -941,14 +1026,31 @@ Please provide a comprehensive, educational response using the course materials 
                         
                 except Exception as e:
                     logger.error(f"Error using conversation chain: {e}")
-                    raw_answer = _generate_clarification_response(request.query, relevant_docs)
                     
-                    # Format the fallback response into educational structure (only when context exists)
-                    context = _merge_and_clean_content(relevant_docs)
-                    if best_score < MINIMUM_THRESHOLD or not context:
-                        answer = "Sorry, I don’t have this information in the available study materials."
-                    else:
-                        answer = _format_educational_response(raw_answer, request.query)
+                    # FIXED: Try clarification response as fallback, but check documents first
+                    # Previous bug: checked context emptiness instead of document existence
+                    # Empty context does NOT mean no documents - it means content filtering removed text
+                    try:
+                        raw_answer = _generate_clarification_response(request.query, relevant_docs)
+                        context = _merge_and_clean_content(relevant_docs)
+                        
+                        # FIXED LOGIC: Only fallback if no documents OR (low score AND no context)
+                        # Don't fallback just because context is empty - documents might still be usable
+                        if not relevant_docs:
+                            answer = "Sorry, I don't have this information in the available study materials."
+                        elif best_score < MINIMUM_THRESHOLD and not context:
+                            # Edge case: score too low and no context, but documents exist
+                            answer = "Sorry, I don't have this information in the available study materials."
+                        else:
+                            # Documents exist and are usable - format the response
+                            answer = _format_educational_response(raw_answer, request.query)
+                    except Exception as fallback_error:
+                        logger.error(f"Error in fallback clarification response: {fallback_error}")
+                        # Last resort: check if we have documents at all
+                        if relevant_docs:
+                            answer = "I found relevant documents but encountered an error processing them. Please try rephrasing your question."
+                        else:
+                            answer = "Sorry, I don't have this information in the available study materials."
                 
                 # Process sources
                 sources = []
