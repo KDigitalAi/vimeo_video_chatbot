@@ -54,7 +54,6 @@ def store_chat_interaction(
             "session_id": session_id,
             "user_message": user_message,
             "bot_response": bot_response,
-            "video_id": video_id,
             "created_at": datetime.utcnow().isoformat()
         }
         

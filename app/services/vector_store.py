@@ -104,6 +104,7 @@ class SupabaseVectorStore:
                         "pdf_title": row.get("pdf_title"),
                         "page_number": row.get("page_number"),
                         "chunk_id": row.get("chunk_id"),
+                        "folder": row.get("folder"),
                     },
                 )
                 results.append((doc, score))

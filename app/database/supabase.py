@@ -50,16 +50,62 @@ def get_supabase():
 
 
 def test_connection():
-    """Test if Supabase is reachable and pdf_embeddings table exists."""
+    """Test if Supabase is reachable and all required tables exist."""
     from app.utils.logger import logger
+    results = {
+        "connected": False,
+        "tables": {},
+        "errors": []
+    }
+    
     try:
-        resp = get_supabase().table("pdf_embeddings").select("*").limit(1).execute()
-        logger.info(f"Supabase connection OK. PDF embeddings table returned {len(resp.data)} rows.")
-        if resp.data:
-            logger.debug(f"Sample data: {resp.data[0]}")
+        client = get_supabase()
+        if client is None:
+            logger.error("Supabase client is None")
+            results["errors"].append("Supabase client is None")
+            return results
+        
+        # Test all required tables
+        required_tables = [
+            "pdf_embeddings",
+            "chat_history", 
+            "user_queries",
+            "user_profile"
+        ]
+        
+        all_tables_ok = True
+        for table_name in required_tables:
+            try:
+                resp = client.table(table_name).select("*").limit(1).execute()
+                results["tables"][table_name] = {
+                    "exists": True,
+                    "accessible": True,
+                    "row_count": len(resp.data) if resp.data else 0
+                }
+                logger.info(f"[OK] Table '{table_name}' is accessible (rows: {len(resp.data) if resp.data else 0})")
+            except Exception as e:
+                error_msg = str(e)
+                results["tables"][table_name] = {
+                    "exists": False,
+                    "accessible": False,
+                    "error": error_msg
+                }
+                results["errors"].append(f"Table '{table_name}': {error_msg}")
+                logger.error(f"[ERROR] Table '{table_name}' failed: {error_msg}")
+                all_tables_ok = False
+        
+        results["connected"] = all_tables_ok
+        if all_tables_ok:
+            logger.info("[OK] Supabase connection OK. All required tables are accessible.")
         else:
-            logger.info("PDF embeddings table exists but no data yet.")
-        return True
+            logger.warning("[WARNING] Supabase connection partial. Some tables are not accessible.")
+        
+        return results
+        
     except Exception as e:
-        logger.error(f"Supabase connection failed: {e}")
-        return False
+        error_msg = str(e)
+        logger.error(f"[ERROR] Supabase connection failed: {error_msg}")
+        results["errors"].append(f"Connection error: {error_msg}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return results

@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS public.chat_history (
     created_at timestamptz DEFAULT now()
 );
 
+-- 4. User Profile Table
+CREATE TABLE IF NOT EXISTS public.user_profile (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id text NOT NULL,
+    session_id text NOT NULL,
+    is_active boolean DEFAULT TRUE,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    CONSTRAINT user_profile_session_id_unique UNIQUE (session_id)
+);
+
 -- =========================================
 -- Migration: Add missing columns to pdf_embeddings
 -- =========================================
@@ -83,6 +94,14 @@ ON pdf_embeddings (created_at DESC);
 -- Chat History Indexes
 CREATE INDEX IF NOT EXISTS chat_history_user_idx ON public.chat_history (user_id);
 CREATE INDEX IF NOT EXISTS chat_history_created_at_idx ON public.chat_history (created_at DESC);
+
+-- User Profile Indexes
+CREATE INDEX IF NOT EXISTS user_profile_user_id_idx ON public.user_profile (user_id);
+CREATE INDEX IF NOT EXISTS user_profile_session_id_idx ON public.user_profile (session_id);
+-- Partial index for fast lookup of active sessions per user
+CREATE INDEX IF NOT EXISTS user_profile_active_session_idx 
+ON public.user_profile (user_id) 
+WHERE is_active = TRUE;
 
 -- =========================================
 -- Search Functions
@@ -247,6 +266,91 @@ END;
 $$;
 
 -- =========================================
+-- Session Management Functions
+-- =========================================
+
+-- Function to set active session for a user
+-- This function ensures only ONE active session per user at a time
+-- When a new session is created, all previous sessions for that user are deactivated
+CREATE OR REPLACE FUNCTION set_active_session(
+    p_user_id TEXT,
+    p_session_id TEXT
+)
+RETURNS uuid
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_profile_id uuid;
+BEGIN
+    -- First, deactivate all existing sessions for this user
+    UPDATE public.user_profile
+    SET is_active = FALSE,
+        updated_at = now()
+    WHERE user_id = p_user_id
+      AND is_active = TRUE;
+    
+    -- Check if this session already exists
+    SELECT id INTO v_profile_id
+    FROM public.user_profile
+    WHERE user_id = p_user_id
+      AND session_id = p_session_id;
+    
+    IF v_profile_id IS NOT NULL THEN
+        -- Update existing session to be active
+        UPDATE public.user_profile
+        SET is_active = TRUE,
+            updated_at = now()
+        WHERE id = v_profile_id;
+    ELSE
+        -- Insert new active session
+        INSERT INTO public.user_profile (user_id, session_id, is_active, created_at, updated_at)
+        VALUES (p_user_id, p_session_id, TRUE, now(), now())
+        RETURNING id INTO v_profile_id;
+    END IF;
+    
+    RETURN v_profile_id;
+END;
+$$;
+
+-- Function to get active session for a user
+-- Returns the current active session_id for a given user_id
+CREATE OR REPLACE FUNCTION get_active_session(p_user_id TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    v_session_id TEXT;
+BEGIN
+    SELECT session_id INTO v_session_id
+    FROM public.user_profile
+    WHERE user_id = p_user_id
+      AND is_active = TRUE
+    LIMIT 1;
+    
+    RETURN v_session_id;
+END;
+$$;
+
+-- Trigger function to automatically update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_user_profile_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$;
+
+-- Create trigger to auto-update updated_at on user_profile updates
+DROP TRIGGER IF EXISTS user_profile_updated_at_trigger ON public.user_profile;
+CREATE TRIGGER user_profile_updated_at_trigger
+    BEFORE UPDATE ON public.user_profile
+    FOR EACH ROW
+    EXECUTE FUNCTION update_user_profile_updated_at();
+
+-- =========================================
 -- Permissions
 -- =========================================
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -255,6 +359,7 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT ALL ON user_queries TO anon, authenticated;
 GRANT ALL ON pdf_embeddings TO anon, authenticated;
 GRANT ALL ON public.chat_history TO anon, authenticated;
+GRANT ALL ON public.user_profile TO anon, authenticated;
 
 -- Function permissions
 GRANT EXECUTE ON FUNCTION public.match_pdf_embeddings(vector, int) TO anon, authenticated;
@@ -262,9 +367,23 @@ GRANT EXECUTE ON FUNCTION match_pdf_embeddings(vector, float, int) TO anon, auth
 GRANT EXECUTE ON FUNCTION public.match_documents(vector, int, jsonb) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_pdf_documents TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION delete_pdf_document TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION set_active_session(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION get_active_session(TEXT) TO anon, authenticated;
 
 -- =========================================
 -- Migration Complete
 -- =========================================
 -- This file contains all database schema for the PDF Knowledge Chatbot
--- including PDF embeddings, chat history, and PDF search functions
+-- including PDF embeddings, chat history, user profiles, and PDF search functions
+--
+-- Tables:
+-- 1. user_queries - Stores user query embeddings and matched chunks
+-- 2. pdf_embeddings - Stores PDF content embeddings for vector search
+-- 3. chat_history - Stores chat interactions between users and the bot
+-- 4. user_profile - Manages users and their active sessions with proper isolation
+--
+-- Session Management:
+-- - Only ONE active session per user is allowed at any time
+-- - Use set_active_session(user_id, session_id) to create/activate sessions
+-- - Previous sessions are automatically deactivated when a new one is created
+-- - Session isolation is guaranteed at the database level

@@ -99,7 +99,9 @@ def store_embeddings_directly(chunks: list, table_name: str = None) -> int:
                         "pdf_id": metadata.get("pdf_id"),
                         "pdf_title": metadata.get("pdf_title"),
                         "chunk_id": chunk["chunk_id"],
-                        "page_number": metadata.get("page_number")
+                        "page_number": metadata.get("page_number"),
+                        "source_type": "pdf",
+                        "folder": metadata.get("folder")
                     }
                     records.append(record)
                     

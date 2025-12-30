@@ -320,6 +320,69 @@ The system uses a multi-tier threshold system to prevent false negatives:
   }
   ```
 
+### Session Management Endpoints
+
+**🆕 POST `/chat/session/create`**
+- Create a new chat session for a user
+- **Must be called on every page load / chatbot open**
+- Automatically deactivates all previous sessions for the user
+- **Request Body**:
+  ```json
+  {
+    "user_id": "user123"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "session_id": "a1b2c3d4-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+    "user_id": "user123",
+    "created_at": "2025-12-30T18:00:00Z",
+    "message": "New session created successfully",
+    "note": "All previous sessions for this user have been marked inactive"
+  }
+  ```
+
+**🆕 POST `/chat/session/end`**
+- End a chat session (mark as inactive)
+- **Should be called on page unload / tab close / logout**
+- Clears conversation memory and frees resources
+- **Request Body**:
+  ```json
+  {
+    "user_id": "user123",
+    "session_id": "a1b2c3d4-5e6f-7g8h-9i0j-k1l2m3n4o5p6"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "message": "Session ended successfully",
+    "session_id": "a1b2c3d4-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+    "user_id": "user123",
+    "ended_at": "2025-12-30T18:30:00Z"
+  }
+  ```
+
+**🆕 GET `/chat/session/validate/{user_id}/{session_id}`**
+- Validate if a session is active
+- Useful for checking session status before sending queries
+- **Response**:
+  ```json
+  {
+    "valid": true,
+    "session_id": "a1b2c3d4-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+    "user_id": "user123",
+    "is_active": true,
+    "active_session_id": "a1b2c3d4-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+    "message": "Session is active"
+  }
+  ```
+
+**📖 See `FRONTEND_SESSION_GUIDE.md` for complete integration guide**
+
+### Chat History Endpoints
+
 **GET `/chat/history/{user_id}`**
 - Retrieve chat history for a user
 - **Query Parameters**: `session_id` (optional), `limit` (default: 50)

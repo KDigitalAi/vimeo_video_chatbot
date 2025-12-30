@@ -171,6 +171,27 @@ if app is not None and FASTAPI_AVAILABLE:
             }
         )
 
+# Startup event - test database connection
+if app is not None and FASTAPI_AVAILABLE:
+    @app.on_event("startup")
+    async def startup_event():
+        """Test database connection on startup."""
+        try:
+            from app.database.supabase import test_connection
+            logger.info("Testing Supabase database connection on startup...")
+            connection_result = test_connection()
+            
+            if connection_result.get("connected"):
+                logger.info("[OK] Database connection successful. All tables are accessible.")
+            else:
+                logger.warning("[WARNING] Database connection issues detected:")
+                for error in connection_result.get("errors", []):
+                    logger.warning(f"  - {error}")
+                logger.warning("Some features may not work correctly. Check your Supabase configuration.")
+        except Exception as e:
+            logger.error(f"Failed to test database connection on startup: {e}")
+            logger.warning("Application will continue, but database features may not work.")
+
 # Health check - must work without dependencies
 if app is not None and FASTAPI_AVAILABLE:
     @app.get("/health")
@@ -233,25 +254,33 @@ if app is not None and FASTAPI_AVAILABLE:
             supabase_url = os.getenv("SUPABASE_URL")
             supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
             if supabase_url and supabase_key:
-                # Try to actually connect
+                # Try to actually connect and test all tables
                 try:
-                    from app.services.vector_store import load_supabase_vectorstore
-                    if load_supabase_vectorstore:
+                    from app.database.supabase import test_connection
+                    connection_result = test_connection()
+                    
+                    if connection_result.get("connected"):
                         health_status["services"]["supabase"] = {
                             "status": "available",
                             "url": "configured",
-                            "key": "configured"
+                            "key": "configured",
+                            "tables": connection_result.get("tables", {}),
+                            "all_tables_accessible": True
                         }
                     else:
                         health_status["services"]["supabase"] = {
-                            "status": "unavailable",
-                            "error": "vector_store module not available"
+                            "status": "degraded",
+                            "url": "configured",
+                            "key": "configured",
+                            "tables": connection_result.get("tables", {}),
+                            "all_tables_accessible": False,
+                            "errors": connection_result.get("errors", [])
                         }
                         overall_healthy = False
                 except Exception as e:
                     health_status["services"]["supabase"] = {
                         "status": "error",
-                        "error": f"Connection failed: {str(e)}"
+                        "error": f"Connection test failed: {str(e)}"
                     }
                     overall_healthy = False
             else:
@@ -554,14 +583,22 @@ if app is not None and FASTAPI_AVAILABLE:
                 diagnostics["import_errors"][service_name] = str(e)
                 diagnostics["recommendations"].append(f"Fix error for {service_name}: {str(e)}")
         
-        # Check if Supabase can be initialized
+        # Check if Supabase can be initialized and test all tables
         try:
-            from app.database.supabase import get_supabase
+            from app.database.supabase import get_supabase, test_connection
             supabase = get_supabase()
+            connection_result = test_connection()
+            
             diagnostics["supabase_connection"] = {
-                "status": "success",
-                "client_type": str(type(supabase))
+                "status": "success" if connection_result.get("connected") else "partial",
+                "client_type": str(type(supabase)),
+                "tables": connection_result.get("tables", {}),
+                "errors": connection_result.get("errors", [])
             }
+            
+            if not connection_result.get("connected"):
+                for error in connection_result.get("errors", []):
+                    diagnostics["recommendations"].append(f"Fix Supabase: {error}")
         except Exception as e:
             diagnostics["supabase_connection"] = {
                 "status": "failed",
@@ -635,6 +672,31 @@ if app is not None and FASTAPI_AVAILABLE:
                 "environment": getattr(settings, 'ENVIRONMENT', 'unknown') if 'settings' in globals() else 'unknown'
             }
     
+    # Database connection test endpoint
+    @app.get("/health/database")
+    async def database_health_check():
+        """Test database connection and all tables."""
+        try:
+            from app.database.supabase import test_connection
+            connection_result = test_connection()
+            
+            return {
+                "status": "connected" if connection_result.get("connected") else "degraded",
+                "timestamp": datetime.utcnow().isoformat(),
+                "tables": connection_result.get("tables", {}),
+                "errors": connection_result.get("errors", []),
+                "message": "All tables accessible" if connection_result.get("connected") else "Some tables are not accessible"
+            }
+        except Exception as e:
+            import traceback
+            return {
+                "status": "error",
+                "timestamp": datetime.utcnow().isoformat(),
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "message": "Database connection test failed"
+            }
+
     # Add logs endpoint (Vercel-compatible)
     @app.get("/_logs")
     async def get_logs():

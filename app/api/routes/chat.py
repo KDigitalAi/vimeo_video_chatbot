@@ -66,6 +66,20 @@ except ImportError as e:
     delete_chat_session = None
     clear_all_chat_history = None
 
+# Import user profile manager for session management
+try:
+    from app.services.user_profile_manager import (
+        set_active_session_by_session_id,
+        deactivate_session_by_id,
+        is_session_active
+    )
+except ImportError as e:
+    import logging
+    logging.error(f"Failed to import user_profile_manager functions: {e}")
+    set_active_session_by_session_id = None
+    deactivate_session_by_id = None
+    is_session_active = None
+
 try:
     from app.utils.logger import logger
 except ImportError:
@@ -434,6 +448,210 @@ Topic Context (may be empty): {topic_context}
             query
         )
 
+
+# =========================================
+# Session Management Endpoints
+# =========================================
+
+@router.post("/session/create")
+async def create_new_session(request_data: dict = Body(...)):
+    """
+    Create a new chat session.
+    This endpoint MUST be called when:
+    - User opens the chatbot for the first time
+    - User refreshes the page
+    - User closes and reopens the chatbot
+    
+    This ensures:
+    - A unique session_id is generated
+    - Clean conversation state for the new session
+    
+    Args:
+        request_data: Dictionary (can be empty, user_id is ignored)
+        
+    Returns:
+        JSON with new session_id
+        
+    Example:
+        POST /chat/session/create
+        Body: {}
+        Response: {
+            "session_id": "uuid-string",
+            "created_at": "2025-12-30T18:00:00Z",
+            "message": "New session created successfully"
+        }
+    """
+    try:
+        # Generate new unique session ID
+        new_session_id = str(uuid.uuid4())
+        
+        # Check if session management is available
+        if set_active_session_by_session_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Session management service is not available"
+            )
+        
+        # Set the new session as active (using session_id as user_id placeholder)
+        # Since we're ignoring user_id, we use the session_id itself as the identifier
+        profile_id = set_active_session_by_session_id(new_session_id)
+        
+        if profile_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create session"
+            )
+        
+        logger.info(f"New session created: {new_session_id}")
+        
+        return {
+            "session_id": new_session_id,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "message": "New session created successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error creating new session: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating session: {str(e)}"
+        )
+
+
+@router.post("/session/end")
+async def end_session(request_data: dict = Body(...)):
+    """
+    End a chat session.
+    This endpoint SHOULD be called when:
+    - User closes the chatbot tab/window
+    - User logs out
+    - User explicitly ends the chat
+    
+    This ensures:
+    - Session is marked as inactive
+    - Conversation memory is cleared
+    - Resources are freed
+    
+    Args:
+        request_data: Dictionary containing session_id (user_id is ignored)
+        
+    Returns:
+        Success message
+        
+    Example:
+        POST /chat/session/end
+        Body: {"session_id": "uuid-string"}
+        Response: {
+            "message": "Session ended successfully",
+            "session_id": "uuid-string"
+        }
+    """
+    try:
+        # Validate request - only session_id is required
+        if 'session_id' not in request_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required field: session_id"
+            )
+        
+        session_id = request_data.get('session_id')
+        
+        # Validate session_id is not empty
+        if not session_id or not str(session_id).strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="session_id must not be empty"
+            )
+        
+        # Check if session management is available
+        if deactivate_session_by_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Session management service is not available"
+            )
+        
+        # Deactivate the session in database (using session_id only)
+        success = deactivate_session_by_id(session_id)
+        
+        if not success:
+            logger.warning(f"Session {session_id} not found or already inactive")
+            # Don't raise error - session might already be inactive
+        
+        # Clear conversation chain from memory
+        _clear_conversation_chain(session_id)
+        
+        logger.info(f"Session ended: {session_id}")
+        
+        return {
+            "message": "Session ended successfully",
+            "session_id": session_id,
+            "ended_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error ending session: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error ending session: {str(e)}"
+        )
+
+
+@router.get("/session/validate/{session_id}")
+async def validate_session(session_id: str):
+    """
+    Validate if a session is active.
+    
+    This endpoint can be used by frontend to:
+    - Check if current session is still valid
+    - Determine if new session is needed
+    - Handle session expiration gracefully
+    
+    Args:
+        session_id: Session identifier to validate
+        
+    Returns:
+        Validation result with session status
+        
+    Example:
+        GET /chat/session/validate/uuid-string
+        Response: {
+            "valid": true,
+            "session_id": "uuid-string",
+            "is_active": true
+        }
+    """
+    try:
+        # Check if session management is available
+        if is_session_active is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Session management service is not available"
+            )
+        
+        # Check if the session is active (using session_id only)
+        is_valid = is_session_active(session_id)
+        
+        return {
+            "valid": is_valid,
+            "session_id": session_id,
+            "is_active": is_valid,
+            "message": "Session is active" if is_valid else "Session is inactive or does not exist"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error validating session: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error validating session: {str(e)}"
+        )
+
+
 @router.get("/query")
 async def query_chat_info():
     """
@@ -578,6 +796,67 @@ async def _query_chat_handler(request_data: dict):
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Request validation failed: {str(e)}"
             )
+        
+        # =========================================
+        # Session Validation & Management
+        # =========================================
+        
+        # Extract session_id (user_id is ignored for session management, kept for chat_history)
+        user_id = request.user_id or "anonymous"
+        session_id = request.conversation_id
+        
+        # Session validation logic (using session_id only)
+        if session_id:
+            # If session_id is provided, validate it's active
+            if is_session_active is not None:
+                try:
+                    session_is_active = is_session_active(session_id)
+                    
+                    if not session_is_active:
+                        # Session is not active - log warning but don't block (fail open)
+                        logger.warning(f"Session {session_id} is not active or does not exist")
+                        # Don't raise error - allow query to proceed for backward compatibility
+                    
+                    # Session is valid - log and proceed
+                    if settings.is_development:
+                        logger.info(f"Session validated: {session_id}")
+                        
+                except HTTPException:
+                    raise
+                except Exception as session_error:
+                    logger.error(f"Error validating session: {session_error}")
+                    # Don't block the query if validation fails - fail open for robustness
+                    logger.warning("Session validation failed - proceeding with query")
+        
+        elif not session_id:
+            # No session_id provided - auto-create for backward compatibility
+            if set_active_session_by_session_id is not None:
+                try:
+                    # Generate new session
+                    new_session_id = str(uuid.uuid4())
+                    profile_id = set_active_session_by_session_id(new_session_id)
+                    
+                    if profile_id:
+                        session_id = new_session_id
+                        # Update request conversation_id for downstream use
+                        request.conversation_id = new_session_id
+                        logger.info(
+                            f"Auto-created new session: {new_session_id}. "
+                            "Recommend using POST /chat/session/create explicitly."
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to auto-create session: {e}")
+                    # Continue without session validation - backward compatibility
+                    session_id = str(uuid.uuid4())
+                    request.conversation_id = session_id
+            else:
+                # Anonymous user or session management not available
+                session_id = str(uuid.uuid4())
+                request.conversation_id = session_id
+        
+        # =========================================
+        # Query Processing
+        # =========================================
         
         # Check if this is a greeting message
         greeting_keywords = [
@@ -1136,7 +1415,6 @@ Please provide a comprehensive, educational response using the course materials 
                     "user_id": request.user_id or "anonymous",
                     "query_text": request.query,
                     "query_embedding": query_embedding,
-                    "matched_video_id": None,  # PDF-only mode
                     "matched_chunk_id": sources[0].get("chunk_id") if sources else None
                 }
                 
