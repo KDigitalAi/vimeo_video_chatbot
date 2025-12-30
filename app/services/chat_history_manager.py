@@ -130,6 +130,50 @@ def get_chat_history(
         return []
 
 
+def get_chat_history_by_session(session_id: str, limit: int = 50) -> List[Dict]:
+    """
+    Retrieve chat history for a specific session (session_id only, user_id ignored).
+    This ensures only data from the specified session is returned.
+    
+    Args:
+        session_id: Session identifier to filter by
+        limit: Maximum number of records to return
+        
+    Returns:
+        List of chat history records for this session only
+    """
+    # Check memory before processing
+    if not check_memory_threshold():
+        logger.warning("Memory usage high before retrieving chat history")
+        cleanup_memory()
+    
+    try:
+        supabase = get_supabase()
+        
+        # Limit the number of records to prevent memory issues
+        max_limit = min(limit, 100)  # Cap at 100 records
+        
+        # Filter ONLY by session_id (user_id is ignored)
+        query = supabase.table("chat_history").select("*").eq(
+            "session_id", session_id
+        ).order("created_at", desc=True).limit(max_limit)
+        
+        result = query.execute()
+        
+        if result.data:
+            logger.info(f"Retrieved {len(result.data)} chat history records for session {session_id}")
+            log_memory_usage("chat history retrieval")
+            return result.data
+        else:
+            logger.info(f"No chat history found for session {session_id}")
+            return []
+            
+    except Exception as e:
+        logger.error(f"Failed to retrieve chat history for session {session_id}: {e}")
+        cleanup_memory()
+        return []
+
+
 def get_chat_sessions(user_id: str) -> List[Dict]:
     """
     Get all chat sessions for a user.

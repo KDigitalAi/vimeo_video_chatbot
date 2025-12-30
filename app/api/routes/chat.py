@@ -53,6 +53,7 @@ try:
     from app.services.chat_history_manager import (
         store_chat_interaction, 
         get_chat_history, 
+        get_chat_history_by_session,
         get_chat_sessions,
         delete_chat_session,
         clear_all_chat_history
@@ -62,6 +63,7 @@ except ImportError as e:
     logging.error(f"Failed to import chat_history_manager functions: {e}")
     store_chat_interaction = None
     get_chat_history = None
+    get_chat_history_by_session = None
     get_chat_sessions = None
     delete_chat_session = None
     clear_all_chat_history = None
@@ -805,21 +807,73 @@ async def _query_chat_handler(request_data: dict):
         user_id = request.user_id or "anonymous"
         session_id = request.conversation_id
         
-        # Session validation logic (using session_id only)
-        if session_id:
-            # If session_id is provided, validate it's active
+        # CRITICAL: Always ensure a fresh session on first API call
+        # This prevents old data from showing up in new conversations
+        if not session_id:
+            # No session_id provided - CREATE NEW SESSION (this deactivates all old sessions)
+            if set_active_session_by_session_id is not None:
+                try:
+                    # Generate new session - this will automatically deactivate old sessions
+                    new_session_id = str(uuid.uuid4())
+                    
+                    # Clear any existing conversation chain for this new session to ensure fresh start
+                    _clear_conversation_chain(new_session_id)
+                    
+                    profile_id = set_active_session_by_session_id(new_session_id)
+                    
+                    if profile_id:
+                        session_id = new_session_id
+                        # Update request conversation_id for downstream use
+                        request.conversation_id = new_session_id
+                        logger.info(f"Auto-created NEW session: {new_session_id} (old sessions deactivated, conversation chain cleared)")
+                    else:
+                        # Fallback if session creation fails
+                        session_id = str(uuid.uuid4())
+                        request.conversation_id = session_id
+                        logger.warning(f"Session creation returned None, using fallback: {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to auto-create session: {e}")
+                    # Fallback: create session ID but can't register it
+                    session_id = str(uuid.uuid4())
+                    request.conversation_id = session_id
+            else:
+                # Session management not available - just generate ID
+                session_id = str(uuid.uuid4())
+                request.conversation_id = session_id
+        
+        elif session_id:
+            # Session_id provided - validate it's active
             if is_session_active is not None:
                 try:
                     session_is_active = is_session_active(session_id)
                     
                     if not session_is_active:
-                        # Session is not active - log warning but don't block (fail open)
-                        logger.warning(f"Session {session_id} is not active or does not exist")
-                        # Don't raise error - allow query to proceed for backward compatibility
-                    
-                    # Session is valid - log and proceed
-                    if settings.is_development:
-                        logger.info(f"Session validated: {session_id}")
+                        # Session is not active - CREATE NEW SESSION to prevent old data
+                        logger.warning(f"Session {session_id} is not active - creating new session")
+                        try:
+                            # Clear old conversation chain for the inactive session
+                            _clear_conversation_chain(session_id)
+                            
+                            # Generate new session ID
+                            new_session_id = str(uuid.uuid4())
+                            
+                            # Clear conversation chain for new session to ensure fresh start
+                            _clear_conversation_chain(new_session_id)
+                            
+                            profile_id = set_active_session_by_session_id(new_session_id)
+                            if profile_id:
+                                session_id = new_session_id
+                                request.conversation_id = new_session_id
+                                logger.info(f"Created new active session: {new_session_id} (old session {session_id} cleared)")
+                            else:
+                                logger.warning(f"Failed to create new session, using provided: {session_id}")
+                        except Exception as e:
+                            logger.error(f"Error creating new session: {e}")
+                            # Continue with provided session_id but log warning
+                    else:
+                        # Session is valid - log and proceed
+                        if settings.is_development:
+                            logger.info(f"Session validated: {session_id}")
                         
                 except HTTPException:
                     raise
@@ -828,31 +882,6 @@ async def _query_chat_handler(request_data: dict):
                     # Don't block the query if validation fails - fail open for robustness
                     logger.warning("Session validation failed - proceeding with query")
         
-        elif not session_id:
-            # No session_id provided - auto-create for backward compatibility
-            if set_active_session_by_session_id is not None:
-                try:
-                    # Generate new session
-                    new_session_id = str(uuid.uuid4())
-                    profile_id = set_active_session_by_session_id(new_session_id)
-                    
-                    if profile_id:
-                        session_id = new_session_id
-                        # Update request conversation_id for downstream use
-                        request.conversation_id = new_session_id
-                        logger.info(
-                            f"Auto-created new session: {new_session_id}. "
-                            "Recommend using POST /chat/session/create explicitly."
-                        )
-                except Exception as e:
-                    logger.error(f"Failed to auto-create session: {e}")
-                    # Continue without session validation - backward compatibility
-                    session_id = str(uuid.uuid4())
-                    request.conversation_id = session_id
-            else:
-                # Anonymous user or session management not available
-                session_id = str(uuid.uuid4())
-                request.conversation_id = session_id
         
         # =========================================
         # Query Processing
@@ -1455,31 +1484,44 @@ Please provide a comprehensive, educational response using the course materials 
         )
 
 
-@router.get("/history/{user_id}")
-async def get_user_chat_history(
-    user_id: str,
-    session_id: str = None,
+@router.get("/history/{session_id}")
+async def get_session_chat_history(
+    session_id: str,
     limit: int = 50
 ):
     """
-    Retrieve chat history for a user.
+    Retrieve chat history for a specific session (session_id only, user_id ignored).
+    This ensures only data from the specified session is returned, preventing old data from appearing.
     
     Args:
-        user_id: User identifier
-        session_id: Optional session identifier to filter by
+        session_id: Session identifier (required)
         limit: Maximum number of records to return
         
     Returns:
-        List of chat history records
+        List of chat history records for this session only
     """
     try:
-        history = get_chat_history(user_id, session_id, limit)
+        if not session_id or not str(session_id).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="session_id is required"
+            )
+        
+        # Use session_id-only function to ensure isolation
+        if get_chat_history_by_session is not None:
+            history = get_chat_history_by_session(session_id, limit)
+        else:
+            # Fallback to old method if new function not available
+            history = get_chat_history("anonymous", session_id, limit) if get_chat_history else []
+        
         return {
-            "user_id": user_id,
             "session_id": session_id,
             "history": history,
-            "count": len(history)
+            "count": len(history),
+            "message": "Only data from this session is returned"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error retrieving chat history")
         raise HTTPException(

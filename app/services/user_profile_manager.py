@@ -211,7 +211,8 @@ def get_user_sessions(user_id: str, include_inactive: bool = False) -> list:
 def set_active_session_by_session_id(session_id: str) -> Optional[str]:
     """
     Set active session using only session_id.
-    Since user_id is required in database, we use session_id as user_id.
+    Since user_id is required in database, we use a constant placeholder.
+    This ensures all sessions share the same user_id so old sessions are properly deactivated.
     
     Args:
         session_id: Session identifier to activate
@@ -227,15 +228,16 @@ def set_active_session_by_session_id(session_id: str) -> Optional[str]:
     try:
         supabase = get_supabase()
         
-        # Use session_id as user_id (since we're ignoring user_id)
-        # This allows the database structure to remain unchanged
-        user_id_placeholder = session_id
+        # Use a constant placeholder user_id for all sessions when user_id is ignored
+        # This ensures the database function properly deactivates old sessions
+        # since it deactivates all sessions for the same user_id
+        USER_ID_PLACEHOLDER = "__session_only__"
         
         # Use the database function to ensure atomic session management
         result = supabase.rpc(
             "set_active_session",
             {
-                "p_user_id": user_id_placeholder,
+                "p_user_id": USER_ID_PLACEHOLDER,
                 "p_session_id": session_id
             }
         ).execute()
