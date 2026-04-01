@@ -1,10 +1,12 @@
 from typing import Optional, Any
+from app.utils.runtime_helpers import get_logger_safe, get_settings_safe
+
+logger = get_logger_safe(__name__)
 
 # Lazy import to prevent circular dependencies and import-time failures
 def _get_settings():
     """Lazy import of settings to prevent circular dependencies."""
-    from app.config.settings import settings
-    return settings
+    return get_settings_safe()
 
 def _get_supabase_direct():
     """Lazy import of get_supabase_direct to prevent circular dependencies."""
@@ -29,18 +31,15 @@ def get_supabase():
             key_valid = settings.SUPABASE_SERVICE_KEY and not settings.SUPABASE_SERVICE_KEY.startswith("your_")
             
             if not url_valid:
-                from app.utils.logger import logger
                 logger.warning("SUPABASE_URL is not properly configured")
                 raise ValueError("SUPABASE_URL is not properly configured")
             
             if not key_valid:
-                from app.utils.logger import logger
                 logger.warning("SUPABASE_SERVICE_KEY is not properly configured")
                 raise ValueError("SUPABASE_SERVICE_KEY is not properly configured")
             
             _supabase_client = get_supabase_direct()
         except Exception as e:
-            from app.utils.logger import logger
             logger.error(f"Failed to create Supabase client: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -51,7 +50,6 @@ def get_supabase():
 
 def test_connection():
     """Test if Supabase is reachable and all required tables exist."""
-    from app.utils.logger import logger
     results = {
         "connected": False,
         "tables": {},
@@ -68,9 +66,9 @@ def test_connection():
         # Test all required tables
         required_tables = [
             "pdf_embeddings",
-            "chat_history", 
-            "user_queries",
-            "user_profile"
+            "chatbot_chat_history",
+            "chatbot_user_queries",
+            "chatbot_user_profile"
         ]
         
         all_tables_ok = True

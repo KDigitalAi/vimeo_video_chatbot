@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from functools import lru_cache
 from app.database.supabase import get_supabase
-from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+from app.utils.logger import logger, log_memory_usage, cleanup_memory
+from app.utils.runtime_helpers import memory_guard
 
 
 def store_chat_interaction(
@@ -14,10 +15,9 @@ def store_chat_interaction(
     session_id: str,
     user_message: str,
     bot_response: str,
-    video_id: Optional[str] = None
 ) -> Optional[str]:
     """
-    Store a chat interaction in the chat_history table.
+    Store a chat interaction in the chatbot_chat_history table.
     Optimized for memory efficiency with batch processing.
     
     Args:
@@ -25,15 +25,12 @@ def store_chat_interaction(
         session_id: Session identifier for grouping related chats
         user_message: The user's message
         bot_response: The bot's response
-        video_id: Video ID (deprecated - PDF-only mode, kept for database compatibility)
         
     Returns:
         The ID of the stored chat interaction, or None if failed
     """
     # Check memory before processing
-    if not check_memory_threshold():
-        logger.warning("Memory usage high before storing chat interaction")
-        cleanup_memory()
+    memory_guard(logger, "storing chat interaction")
     
     try:
         supabase = get_supabase()
@@ -57,19 +54,20 @@ def store_chat_interaction(
             "created_at": datetime.utcnow().isoformat()
         }
         
-        result = supabase.table("chat_history").insert(chat_record).execute()
+        logger.info("Inserting chat history into chatbot_chat_history (user_id=%s, session_id=%s)", user_id, session_id)
+        result = supabase.table("chatbot_chat_history").insert(chat_record).execute()
         
         if result.data:
             chat_id = result.data[0]["id"]
-            logger.info(f"Chat interaction stored successfully with ID: {chat_id}")
+            logger.info("Chat interaction stored successfully in chatbot_chat_history with ID: %s", chat_id)
             log_memory_usage("chat storage")
             return chat_id
         else:
-            logger.error("Failed to store chat interaction - no data returned")
+            logger.error("Failed to store chat interaction in chatbot_chat_history - no data returned from insert")
             return None
             
     except Exception as e:
-        logger.error(f"Failed to store chat interaction: {e}")
+        logger.error("Failed to store chat interaction in chatbot_chat_history: %s", e, exc_info=True)
         cleanup_memory()
         return None
 
@@ -93,9 +91,7 @@ def get_chat_history(
         List of chat history records
     """
     # Check memory before processing
-    if not check_memory_threshold():
-        logger.warning("Memory usage high before retrieving chat history")
-        cleanup_memory()
+    memory_guard(logger, "retrieving chat history")
     
     try:
         supabase = get_supabase()
@@ -103,7 +99,7 @@ def get_chat_history(
         # Limit the number of records to prevent memory issues
         max_limit = min(limit, 100)  # Cap at 100 records
         
-        query = supabase.table("chat_history").select("*")
+        query = supabase.table("chatbot_chat_history").select("*")
         
         # Always filter by user_id
         query = query.eq("user_id", user_id)
@@ -143,9 +139,7 @@ def get_chat_history_by_session(session_id: str, limit: int = 50) -> List[Dict]:
         List of chat history records for this session only
     """
     # Check memory before processing
-    if not check_memory_threshold():
-        logger.warning("Memory usage high before retrieving chat history")
-        cleanup_memory()
+    memory_guard(logger, "retrieving chat history")
     
     try:
         supabase = get_supabase()
@@ -154,7 +148,7 @@ def get_chat_history_by_session(session_id: str, limit: int = 50) -> List[Dict]:
         max_limit = min(limit, 100)  # Cap at 100 records
         
         # Filter ONLY by session_id (user_id is ignored)
-        query = supabase.table("chat_history").select("*").eq(
+        query = supabase.table("chatbot_chat_history").select("*").eq(
             "session_id", session_id
         ).order("created_at", desc=True).limit(max_limit)
         
@@ -188,7 +182,7 @@ def get_chat_sessions(user_id: str) -> List[Dict]:
         supabase = get_supabase()
         
         # Get unique sessions with their latest message
-        result = supabase.table("chat_history").select(
+        result = supabase.table("chatbot_chat_history").select(
             "session_id, created_at, user_message"
         ).eq("user_id", user_id).order("created_at", desc=True).execute()
         
@@ -229,7 +223,7 @@ def delete_chat_session(user_id: str, session_id: str) -> bool:
     try:
         supabase = get_supabase()
         
-        result = supabase.table("chat_history").delete().eq(
+        result = supabase.table("chatbot_chat_history").delete().eq(
             "user_id", user_id
         ).eq("session_id", session_id).execute()
         
@@ -254,7 +248,7 @@ def clear_all_chat_history(user_id: str) -> bool:
     try:
         supabase = get_supabase()
         
-        result = supabase.table("chat_history").delete().eq("user_id", user_id).execute()
+        result = supabase.table("chatbot_chat_history").delete().eq("user_id", user_id).execute()
         
         logger.info(f"Cleared all chat history for user {user_id}")
         return True

@@ -1,85 +1,58 @@
 """
-PDF storage module for managing PDF embeddings in Supabase.
-Simplified to use the unified vector store functionality.
+PDF storage module: read-only from Assessment pdf_embeddings.
+Chatbot does not create or delete embeddings; Assessment pipeline owns ingestion.
 """
 from typing import List, Dict, Any
-from app.services.vector_store_direct import store_embeddings_directly
 from app.utils.logger import logger
 
-# Shared Supabase client access - DRY consolidation
 def _get_supabase_client():
-    """Get Supabase client - centralized to avoid repetition."""
     from app.database.supabase import get_supabase
     return get_supabase()
 
 def store_pdf_embeddings(chunks: List[Dict[str, Any]], table_name: str = "pdf_embeddings") -> int:
     """
-    Store PDF embeddings using the unified vector store.
-    
-    Args:
-        chunks: List of text chunks with metadata
-        table_name: Supabase table name for PDF embeddings
-        
-    Returns:
-        Number of embeddings stored
+    No-op: PDF embeddings are created only by the Assessment pipeline.
+    Chatbot does not write to pdf_embeddings.
     """
-    if not chunks:
-        logger.warning("No chunks provided for PDF embedding storage")
-        return 0
-    
-    # Use the unified storage function
-    return store_embeddings_directly(chunks, table_name)
+    if chunks:
+        logger.info("PDF embeddings are managed by the Assessment system; skipping chatbot store (%d chunks)", len(chunks))
+    return 0
 
 def check_duplicate_pdf(pdf_id: str, table_name: str = "pdf_embeddings") -> bool:
-    """Check if PDF embeddings already exist for a given PDF ID."""
+    """Check if PDF exists in Assessment pdf_embeddings (read-only)."""
     try:
         supabase_client = _get_supabase_client()
-        result = supabase_client.table(table_name).select("id").eq("pdf_id", pdf_id).limit(1).execute()
+        result = supabase_client.table(table_name).select("pdf_id").eq("pdf_id", pdf_id).limit(1).execute()
         return len(result.data) > 0 if result.data else False
     except Exception as e:
-        logger.error(f"Failed to check duplicate PDF {pdf_id}: {e}")
+        logger.error("Failed to check duplicate PDF %s: %s", pdf_id, e)
         return False
 
 def delete_pdf_embeddings(pdf_id: str, table_name: str = "pdf_embeddings") -> int:
-    """Delete all embeddings for a specific PDF."""
-    try:
-        supabase_client = _get_supabase_client()
-        result = supabase_client.table(table_name).delete().eq("pdf_id", pdf_id).execute()
-        deleted_count = len(result.data) if result.data else 0
-        logger.info(f"Deleted {deleted_count} embeddings for PDF {pdf_id}")
-        return deleted_count
-    except Exception as e:
-        logger.error(f"Failed to delete PDF embeddings for {pdf_id}: {e}")
-        return 0
+    """
+    No-op: Chatbot does not delete from Assessment pdf_embeddings.
+    Deletion is handled by the Assessment system.
+    """
+    logger.info("PDF deletion is managed by the Assessment system; skipping chatbot delete for %s", pdf_id)
+    return 0
 
 def get_pdf_embeddings_count(pdf_id: str, table_name: str = "pdf_embeddings") -> int:
-    """Get the number of embeddings for a specific PDF."""
+    """Count chunks for pdf_id in Assessment pdf_embeddings (read-only)."""
     try:
         supabase_client = _get_supabase_client()
-        result = supabase_client.table(table_name).select("id", count="exact").eq("pdf_id", pdf_id).execute()
-        # Check if count attribute exists (PostgREST may return it differently)
-        if hasattr(result, 'count') and result.count is not None:
-            return result.count
-        # Fallback: count the data if available
-        if result.data:
-            return len(result.data)
-        return 0
+        result = supabase_client.table(table_name).select("pdf_id").eq("pdf_id", pdf_id).execute()
+        return len(result.data) if result.data else 0
     except Exception as e:
-        logger.error(f"Failed to count PDF embeddings for {pdf_id}: {e}")
+        logger.error("Failed to count PDF embeddings for %s: %s", pdf_id, e)
         return 0
 
 def list_pdf_documents(table_name: str = "pdf_embeddings") -> List[Dict[str, Any]]:
-    """List all PDF documents that have embeddings stored."""
+    """List PDFs from Assessment pdf_embeddings (pdf_id, pdf_title); no created_at in Assessment schema."""
     try:
         supabase_client = _get_supabase_client()
-        result = supabase_client.table(table_name).select(
-            "pdf_id, pdf_title, created_at"
-        ).order("created_at", desc=True).execute()
-        
+        result = supabase_client.table(table_name).select("pdf_id, pdf_title").execute()
         if not result.data:
             return []
-        
-        # Group by PDF ID
         pdf_docs = {}
         for row in result.data:
             pdf_id = row.get("pdf_id")
@@ -87,12 +60,10 @@ def list_pdf_documents(table_name: str = "pdf_embeddings") -> List[Dict[str, Any
                 pdf_docs[pdf_id] = {
                     "pdf_id": pdf_id,
                     "pdf_title": row.get("pdf_title", "Unknown"),
-                    "created_at": row.get("created_at"),
                     "embedding_count": 0
                 }
             pdf_docs[pdf_id]["embedding_count"] += 1
-        
         return list(pdf_docs.values())
     except Exception as e:
-        logger.error(f"Failed to list PDF documents: {e}")
+        logger.error("Failed to list PDF documents: %s", e)
         return []

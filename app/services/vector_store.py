@@ -1,9 +1,9 @@
 """
 Lightweight Supabase-backed vector store shim to satisfy chat.py expectations.
-Provides a `load_supabase_vectorstore()` that returns an object with
-`similarity_search_by_vector_with_relevance_scores` reading from
-pdf_embeddings table (PDF-only mode).
+Reads from Assessment pdf_embeddings (chunk_text, chunk_index) via RPC or select.
+Mapping: content = chunk_text, chunk_id = chunk_index. Chatbot does not create embeddings.
 """
+import heapq
 from typing import List, Tuple, Any
 from app.utils.logger import logger
 
@@ -31,7 +31,6 @@ def _cosine_similarity(a: list, b: list) -> float:
             return 0.0
         return float(np.dot(va, vb) / denom)
     except Exception:
-        # Fallback simple implementation
         dot = sum(x * y for x, y in zip(a, b))
         na = sum(x * x for x in a) ** 0.5
         nb = sum(y * y for y in b) ** 0.5
@@ -53,7 +52,32 @@ def _parse_embedding(value: Any) -> list:
             return [float(x.strip()) for x in s.split(",")]
         except Exception:
             return []
+    # Supabase/Postgrest sometimes returns vector as dict (e.g. {"value": "[...]"} or similar)
+    if isinstance(value, dict):
+        for key in ("value", "embedding", "vector", "data"):
+            if key in value and value[key] is not None:
+                return _parse_embedding(value[key])
     return []
+
+
+def _row_to_content_and_metadata(row: dict) -> tuple:
+    """
+    Map pdf_embeddings row to chatbot document shape.
+    Database (Assessment) uses: chunk_text, chunk_index.
+    Chatbot expects: page_content (content), metadata.chunk_id.
+    Mapping: content = chunk_text, chunk_id = chunk_index.
+    RPC returns aliased columns (content, chunk_id); raw select returns chunk_text, chunk_index.
+    """
+    content = row.get("chunk_text") or row.get("content") or ""
+    chunk_id = row.get("chunk_index") if row.get("chunk_index") is not None else row.get("chunk_id")
+    return content, {
+        "source_type": "pdf",
+        "pdf_id": row.get("pdf_id"),
+        "pdf_title": row.get("pdf_title"),
+        "page_number": row.get("page_number"),
+        "chunk_id": chunk_id,
+        "folder": row.get("folder"),
+    }
 
 
 class _SimpleDocument:
@@ -74,135 +98,128 @@ class SupabaseVectorStore:
 
     def similarity_search_by_vector_with_relevance_scores(self, query_embedding: list, k: int = 5) -> List[Tuple[_SimpleDocument, float]]:
         results: List[Tuple[_SimpleDocument, float]] = []
-
-        # Query PDFs with limit to prevent memory issues
-        # Fetch more than k to account for filtering, but not all rows
         try:
-            # Fetch up to k*3 rows to ensure we have enough after filtering
-            # This prevents loading all embeddings into memory
-            fetch_limit = min(k * 3, 1000)  # Cap at 1000 for safety
-            pdf_rows = self._supabase.table("pdf_embeddings").select("*").limit(fetch_limit).execute().data or []
-            
-            # Log how many rows were fetched for debugging
+            # Prefer RPC: vector search in DB on Assessment pdf_embeddings (chunk_text, chunk_index)
+            rpc_rows = self._search_via_rpc(query_embedding, k)
+            if rpc_rows is not None and len(rpc_rows) > 0:
+                for row in rpc_rows:
+                    content, meta = _row_to_content_and_metadata(row)
+                    meta["retrieval_mode"] = "rpc"
+                    meta["retrieval_degraded"] = False
+                    score = float(row.get("similarity", 0.0))
+                    results.append((_SimpleDocument(page_content=content, metadata=meta), score))
+                results.sort(key=lambda x: x[1], reverse=True)
+                return results[:k]
+
+            fallback_reason = "rpc_empty"
+            if rpc_rows is not None and len(rpc_rows) == 0:
+                logger.warning(
+                    "RPC match_pdf_embeddings returned 0 rows (threshold/no match). "
+                    "Trying DEGRADED PostgREST fallback; results are not semantically ordered and must be treated as low confidence. "
+                    "Deploy SQL match_pdf_embeddings floor should match chat RAG_MIN_RELEVANCE_THRESHOLD. "
+                    "query_embedding_dim=%d",
+                    len(query_embedding),
+                )
+
+            # Fallback: aggressively limit candidate rows because this path is unordered,
+            # degraded, and must stay lightweight.
+            fetch_limit = max(30, min(k * 3, 100))
+            pdf_rows = self._supabase.table("pdf_embeddings").select(
+                "chunk_text, embedding, pdf_id, pdf_title, chunk_index, page_number"
+            ).limit(fetch_limit).execute().data or []
+
             if not pdf_rows:
-                logger.warning(f"No PDF embeddings found in database (limit: {fetch_limit})")
-            else:
-                logger.info(f"Fetched {len(pdf_rows)} PDF embedding rows from database")
-            
-            embedding_dimension_mismatches = 0
+                logger.warning(
+                    "No PDF embeddings found. Ensure pdf_embeddings has data and columns: "
+                    "chunk_text, embedding, pdf_id, pdf_title, chunk_index, page_number."
+                )
+                return []
+
+            qdim = len(query_embedding)
+            skipped_dim = 0
+            skipped_empty = 0
+            skipped_low_score = 0
+            sample_stored_dim = None
+            quick_score_threshold = 0.10
+            top_candidates: List[Tuple[_SimpleDocument, float]] = []
+
             for row in pdf_rows:
                 emb = _parse_embedding(row.get("embedding"))
-                if not emb or len(emb) != len(query_embedding):
-                    embedding_dimension_mismatches += 1
+                if not emb:
+                    skipped_empty += 1
+                    continue
+                if len(emb) != qdim:
+                    skipped_dim += 1
+                    if sample_stored_dim is None:
+                        sample_stored_dim = len(emb)
                     continue
                 score = _cosine_similarity(query_embedding, emb)
-                doc = _SimpleDocument(
-                    page_content=row.get("content", ""),
-                    metadata={
-                        "source_type": "pdf",
-                        "pdf_id": row.get("pdf_id"),
-                        "pdf_title": row.get("pdf_title"),
-                        "page_number": row.get("page_number"),
-                        "chunk_id": row.get("chunk_id"),
-                        "folder": row.get("folder"),
-                    },
-                )
-                results.append((doc, score))
-            
-            # Log similarity computation results
-            if embedding_dimension_mismatches > 0:
-                logger.warning(f"Skipped {embedding_dimension_mismatches} rows due to embedding dimension mismatch")
-            
-            if results:
-                scores = [s for _, s in results]
-                logger.info(
-                    f"Computed {len(results)} similarity scores. "
-                    f"Range: {min(scores):.3f} - {max(scores):.3f}"
-                )
-            else:
-                logger.warning("No similarity scores computed - all rows filtered or no matches")
+                if score < quick_score_threshold:
+                    skipped_low_score += 1
+                    continue
+                # Assessment schema: content = chunk_text, chunk_id = chunk_index
+                text = row.get("chunk_text") or ""
+                chunk_id = row.get("chunk_index")
+                meta = {
+                    "source_type": "pdf",
+                    "pdf_id": row.get("pdf_id"),
+                    "pdf_title": row.get("pdf_title"),
+                    "page_number": row.get("page_number"),
+                    "chunk_id": chunk_id,
+                    "folder": row.get("folder"),
+                    "retrieval_mode": "fallback",
+                    "retrieval_degraded": True,
+                    "fallback_reason": fallback_reason,
+                }
+                candidate = (_SimpleDocument(page_content=text, metadata=meta), score)
+                results.append(candidate)
+                top_candidates = heapq.nlargest(k, results, key=lambda x: x[1])
+                results = top_candidates
+
+            if not results and pdf_rows:
+                logger.error(
+                    "pdf_embeddings fallback produced NO scored rows: rows_fetched=%d query_dim=%d "
+                    "skipped_empty_emb=%d skipped_dimension_mismatch=%d skipped_low_score=%d sample_stored_dim=%s "
+                    "— align EMBEDDING_MODEL/dimensions with ingestion or widen RPC/fallback pool.",
+                    len(pdf_rows),
+                    qdim,
+                    skipped_empty,
+                    skipped_dim,
+                    skipped_low_score,
+                    sample_stored_dim,
+)
+
+            # Keep only top-k degraded candidates as early as possible to minimize work.
+            return results
+
         except Exception as e:
-            # Log error but don't crash - return empty results instead
-            logger.error(f"Failed to query PDF embeddings: {e}")
+            logger.error(f"Failed to query Assessment pdf_embeddings: {e}")
             import traceback
-            logger.debug(f"Traceback: {traceback.format_exc()}")
+            logger.debug(traceback.format_exc())
+            return []
 
-        # Video embeddings query removed - PDF-only mode
-
-        # Sort by relevance and trim to top-k
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:k]
-
-    def as_retriever(self, search_kwargs: dict = None):
-        """
-        Create a retriever compatible with LangChain's ConversationalRetrievalChain.
-        """
-        if search_kwargs is None:
-            search_kwargs = {"k": 5}
-        
+    def _search_via_rpc(self, query_embedding: list, k: int):
+        """Call match_pdf_embeddings RPC (reads Assessment pdf_embeddings, returns content/chunk_id)."""
         try:
-            from langchain_core.retrievers import BaseRetriever
-            from langchain_core.documents import Document
-            
-            class SupabaseRetriever(BaseRetriever):
-                vector_store: Any
-                search_kwargs: dict
-                
-                def __init__(self, vector_store, search_kwargs):
-                    super().__init__(vector_store=vector_store, search_kwargs=search_kwargs)
-                
-                def _get_relevant_documents(self, query: str):
-                    # This method is called by LangChain's ConversationalRetrievalChain
-                    # We need to generate embeddings for the query first
-                    try:
-                        from app.services.embedding_manager import get_embeddings_instance
-                        embeddings = get_embeddings_instance()
-                        query_embedding = embeddings.embed_query(query)
-                        
-                        # Use our similarity search method
-                        docs_with_scores = self.vector_store.similarity_search_by_vector_with_relevance_scores(
-                            query_embedding, k=self.search_kwargs.get("k", 5)
-                        )
-                        
-                        # Convert our SimpleDocument to LangChain Document
-                        langchain_docs = []
-                        for doc, score in docs_with_scores:
-                            langchain_doc = Document(
-                                page_content=doc.page_content,
-                                metadata=doc.metadata
-                            )
-                            langchain_docs.append(langchain_doc)
-                        
-                        return langchain_docs
-                    except Exception as e:
-                        logger.error(f"Error in retriever: {e}")
-                        return []
-            
-            return SupabaseRetriever(self, search_kwargs)
-        except ImportError:
-            # Fallback for older LangChain versions
-            class SupabaseRetriever:
-                def __init__(self, vector_store, search_kwargs):
-                    self.vector_store = vector_store
-                    self.search_kwargs = search_kwargs
-                
-                def get_relevant_documents(self, query: str):
-                    try:
-                        from app.services.embedding_manager import get_embeddings_instance
-                        embeddings = get_embeddings_instance()
-                        query_embedding = embeddings.embed_query(query)
-                        
-                        docs_with_scores = self.vector_store.similarity_search_by_vector_with_relevance_scores(
-                            query_embedding, k=self.search_kwargs.get("k", 5)
-                        )
-                        
-                        return [doc for doc, score in docs_with_scores]
-                    except Exception as e:
-                        logger.error(f"Error in retriever: {e}")
-                        return []
-            
-            return SupabaseRetriever(self, search_kwargs)
-
+            # Postgrest often expects vector as string for pgvector
+            vec_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
+            resp = self._supabase.rpc(
+                "match_pdf_embeddings",
+                {"query_embedding": vec_str, "match_count": k}
+            ).execute()
+            if resp.data and len(resp.data) > 0:
+                logger.info("Vector search via RPC (Assessment pdf_embeddings): %d results", len(resp.data))
+                return resp.data
+            # Return empty list so caller can try fallback (RPC succeeded but no rows)
+            return resp.data if resp.data is not None else []
+        except Exception as e:
+            logger.warning(
+                "RPC match_pdf_embeddings FAILED; switching to DEGRADED fallback retrieval: %s. "
+                "Fallback is unordered and must not be treated as equivalent to RPC vector search. "
+                "Ensure chatbot migrations are run and pdf_embeddings has columns chunk_text, chunk_index.",
+                e
+            )
+            return None
 
 def load_supabase_vectorstore() -> SupabaseVectorStore:
     return SupabaseVectorStore()

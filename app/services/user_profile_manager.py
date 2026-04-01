@@ -2,11 +2,10 @@
 User profile management for session handling.
 Manages user profiles and active sessions with proper isolation.
 """
-import uuid
 from typing import Optional, Dict, Any
-from functools import lru_cache
 from app.database.supabase import get_supabase
-from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+from app.utils.logger import logger, log_memory_usage, cleanup_memory
+from app.utils.runtime_helpers import memory_guard
 
 
 def set_active_session(user_id: str, session_id: str) -> Optional[str]:
@@ -22,9 +21,7 @@ def set_active_session(user_id: str, session_id: str) -> Optional[str]:
         Profile ID (UUID) if successful, None otherwise
     """
     # Check memory before processing
-    if not check_memory_threshold():
-        logger.warning("Memory usage high before setting active session")
-        cleanup_memory()
+    memory_guard(logger, "setting active session")
     
     try:
         supabase = get_supabase()
@@ -100,7 +97,7 @@ def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     try:
         supabase = get_supabase()
         
-        result = supabase.table("user_profile").select("*").eq(
+        result = supabase.table("chatbot_user_profile").select("*").eq(
             "user_id", user_id
         ).eq("is_active", True).limit(1).execute()
         
@@ -128,7 +125,7 @@ def deactivate_session(user_id: str, session_id: str) -> bool:
     try:
         supabase = get_supabase()
         
-        result = supabase.table("user_profile").update({
+        result = supabase.table("chatbot_user_profile").update({
             "is_active": False
         }).eq("user_id", user_id).eq("session_id", session_id).execute()
         
@@ -157,7 +154,7 @@ def deactivate_all_sessions(user_id: str) -> int:
     try:
         supabase = get_supabase()
         
-        result = supabase.table("user_profile").update({
+        result = supabase.table("chatbot_user_profile").update({
             "is_active": False
         }).eq("user_id", user_id).eq("is_active", True).execute()
         
@@ -184,7 +181,7 @@ def get_user_sessions(user_id: str, include_inactive: bool = False) -> list:
     try:
         supabase = get_supabase()
         
-        query = supabase.table("user_profile").select("*").eq("user_id", user_id)
+        query = supabase.table("chatbot_user_profile").select("*").eq("user_id", user_id)
         
         if not include_inactive:
             query = query.eq("is_active", True)
@@ -211,8 +208,9 @@ def get_user_sessions(user_id: str, include_inactive: bool = False) -> list:
 def set_active_session_by_session_id(session_id: str) -> Optional[str]:
     """
     Set active session using only session_id.
-    Since user_id is required in database, we use a constant placeholder.
-    This ensures all sessions share the same user_id so old sessions are properly deactivated.
+    Since user_id is required in the database function and we do not have a real
+    authenticated user_id in this path, use the session_id itself as the fallback identity.
+    This keeps session activation isolated per browser/session instead of sharing a global placeholder.
     
     Args:
         session_id: Session identifier to activate
@@ -221,23 +219,20 @@ def set_active_session_by_session_id(session_id: str) -> Optional[str]:
         Profile ID (UUID) if successful, None otherwise
     """
     # Check memory before processing
-    if not check_memory_threshold():
-        logger.warning("Memory usage high before setting active session")
-        cleanup_memory()
+    memory_guard(logger, "setting active session")
     
     try:
         supabase = get_supabase()
         
-        # Use a constant placeholder user_id for all sessions when user_id is ignored
-        # This ensures the database function properly deactivates old sessions
-        # since it deactivates all sessions for the same user_id
-        USER_ID_PLACEHOLDER = "__session_only__"
+        # Use session_id as the fallback user_id to prevent cross-user/session collisions.
+        # This preserves RPC behavior without changing the database schema or function contract.
+        fallback_user_id = session_id
         
         # Use the database function to ensure atomic session management
         result = supabase.rpc(
             "set_active_session",
             {
-                "p_user_id": USER_ID_PLACEHOLDER,
+                "p_user_id": fallback_user_id,
                 "p_session_id": session_id
             }
         ).execute()
@@ -271,7 +266,7 @@ def deactivate_session_by_id(session_id: str) -> bool:
         supabase = get_supabase()
         
         # Deactivate by session_id only (user_id is ignored)
-        result = supabase.table("user_profile").update({
+        result = supabase.table("chatbot_user_profile").update({
             "is_active": False
         }).eq("session_id", session_id).execute()
         
@@ -300,7 +295,7 @@ def is_session_active(session_id: str) -> bool:
     try:
         supabase = get_supabase()
         
-        result = supabase.table("user_profile").select("is_active").eq(
+        result = supabase.table("chatbot_user_profile").select("is_active").eq(
             "session_id", session_id
         ).eq("is_active", True).limit(1).execute()
         

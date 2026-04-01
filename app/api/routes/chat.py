@@ -1,53 +1,56 @@
 """
 Chat router with enhanced security and validation.
 """
+import asyncio
+import os
 import time
 import uuid
+import app.services.chat_tracking as _chat_tracking_module
 from fastapi import APIRouter, HTTPException, status, Body
+from app.utils.runtime_helpers import get_logger_safe, get_settings_safe
+from app.services.chat_session_memory import (
+    _conversation_chains,
+    MAX_IN_MEMORY_SESSIONS,
+    MAX_SESSION_MESSAGES,
+    SESSION_TTL_SECONDS,
+    _get_or_create_conversation_chain as _session_get_or_create_conversation_chain,
+    _clear_conversation_chain as _session_clear_conversation_chain,
+)
+from app.services.chat_tracking import (
+    _dispatch_chat_tracking as _tracking_dispatch_chat_tracking,
+)
+from app.services.chat_generation import (
+    _follow_up_topic_hint as _generation_follow_up_topic_hint,
+    _looks_already_structured as _generation_looks_already_structured,
+    _format_educational_response as _generation_format_educational_response,
+    build_grounded_prompt as _generation_build_grounded_prompt,
+    _generate_clarification_response as _generation_generate_clarification_response,
+    _generate_weak_hybrid_response as _generation_generate_weak_hybrid_response,
+    _generate_context_grounded_response as _generation_generate_context_grounded_response,
+)
 
 # Safe imports with error handling for serverless environments
 # Try importing with detailed error capture
 load_supabase_vectorstore = None
-get_conversational_chain = None
 _import_errors = {}
+_bootstrap_logger = get_logger_safe(__name__)
 
 try:
     from app.services.vector_store import load_supabase_vectorstore
     if load_supabase_vectorstore is None:
         _import_errors['vector_store'] = "load_supabase_vectorstore function is None"
 except ImportError as e:
-    import logging
     import traceback
     error_msg = f"ImportError: {str(e)}"
     _import_errors['vector_store'] = error_msg
-    logging.error(f"Failed to import load_supabase_vectorstore: {error_msg}")
-    logging.error(f"Traceback: {traceback.format_exc()}")
+    _bootstrap_logger.error(f"Failed to import load_supabase_vectorstore: {error_msg}")
+    _bootstrap_logger.error(f"Traceback: {traceback.format_exc()}")
 except Exception as e:
-    import logging
     import traceback
     error_msg = f"Unexpected error importing vector_store: {str(e)}"
     _import_errors['vector_store'] = error_msg
-    logging.error(f"Failed to import load_supabase_vectorstore: {error_msg}")
-    logging.error(f"Traceback: {traceback.format_exc()}")
-
-try:
-    from app.services.retriever_chain import get_conversational_chain
-    if get_conversational_chain is None:
-        _import_errors['retriever_chain'] = "get_conversational_chain function is None"
-except ImportError as e:
-    import logging
-    import traceback
-    error_msg = f"ImportError: {str(e)}"
-    _import_errors['retriever_chain'] = error_msg
-    logging.error(f"Failed to import get_conversational_chain: {error_msg}")
-    logging.error(f"Traceback: {traceback.format_exc()}")
-except Exception as e:
-    import logging
-    import traceback
-    error_msg = f"Unexpected error importing retriever_chain: {str(e)}"
-    _import_errors['retriever_chain'] = error_msg
-    logging.error(f"Failed to import get_conversational_chain: {error_msg}")
-    logging.error(f"Traceback: {traceback.format_exc()}")
+    _bootstrap_logger.error(f"Failed to import load_supabase_vectorstore: {error_msg}")
+    _bootstrap_logger.error(f"Traceback: {traceback.format_exc()}")
 
 try:
     from app.services.chat_history_manager import (
@@ -59,8 +62,7 @@ try:
         clear_all_chat_history
     )
 except ImportError as e:
-    import logging
-    logging.error(f"Failed to import chat_history_manager functions: {e}")
+    _bootstrap_logger.error(f"Failed to import chat_history_manager functions: {e}")
     store_chat_interaction = None
     get_chat_history = None
     get_chat_history_by_session = None
@@ -76,17 +78,12 @@ try:
         is_session_active
     )
 except ImportError as e:
-    import logging
-    logging.error(f"Failed to import user_profile_manager functions: {e}")
+    _bootstrap_logger.error(f"Failed to import user_profile_manager functions: {e}")
     set_active_session_by_session_id = None
     deactivate_session_by_id = None
     is_session_active = None
 
-try:
-    from app.utils.logger import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+logger = get_logger_safe(__name__)
 
 ChatRequest = None
 ChatResponse = None
@@ -129,52 +126,54 @@ try:
         _import_errors['schemas'] = "ChatRequest or ChatResponse is None after import"
         
 except ImportError as e:
-    import logging
     import traceback
     error_msg = f"ImportError: {str(e)}"
     _import_errors['schemas'] = error_msg
-    logging.error(f"Failed to import schemas: {error_msg}")
-    logging.error(f"Traceback: {traceback.format_exc()}")
+    _bootstrap_logger.error(f"Failed to import schemas: {error_msg}")
+    _bootstrap_logger.error(f"Traceback: {traceback.format_exc()}")
     # Add diagnostic info
     try:
         import sys
-        logging.error(f"Python path: {sys.path[:5]}")
-        logging.error(f"Current dir: {os.getcwd()}")
-        logging.error(f"File location: {__file__}")
+        _bootstrap_logger.error(f"Python path: {sys.path[:5]}")
+        _bootstrap_logger.error(f"Current dir: {os.getcwd()}")
+        _bootstrap_logger.error(f"File location: {__file__}")
         # Check if app directory exists
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file_dir)))
         app_dir = os.path.join(project_root, "app")
         models_dir = os.path.join(app_dir, "models")
-        logging.error(f"Project root: {project_root}")
-        logging.error(f"App dir exists: {os.path.exists(app_dir)}")
-        logging.error(f"Models dir exists: {os.path.exists(models_dir)}")
+        _bootstrap_logger.error(f"Project root: {project_root}")
+        _bootstrap_logger.error(f"App dir exists: {os.path.exists(app_dir)}")
+        _bootstrap_logger.error(f"Models dir exists: {os.path.exists(models_dir)}")
         if os.path.exists(models_dir):
-            logging.error(f"Models dir contents: {os.listdir(models_dir)}")
+            _bootstrap_logger.error(f"Models dir contents: {os.listdir(models_dir)}")
     except Exception as diag_error:
-        logging.error(f"Could not gather diagnostics: {diag_error}")
+        _bootstrap_logger.error(f"Could not gather diagnostics: {diag_error}")
 except Exception as e:
-    import logging
     import traceback
     error_msg = f"Unexpected error importing schemas: {str(e)}"
     _import_errors['schemas'] = error_msg
-    logging.error(f"Failed to import schemas: {error_msg}")
-    logging.error(f"Traceback: {traceback.format_exc()}")
+    _bootstrap_logger.error(f"Failed to import schemas: {error_msg}")
+    _bootstrap_logger.error(f"Traceback: {traceback.format_exc()}")
 
-try:
-    from app.config.settings import settings
-except ImportError:
-    import logging
-    logging.error("Failed to import settings - this should not happen in production")
-    raise
+settings = get_settings_safe()
 
 router = APIRouter()
 
-# Global dictionary to store conversation chains per session
-_conversation_chains = {}
-
 # Global vector store instance
 _global_vector_store = None
+
+# RAG / similarity (same scale as Python cosine and 1 - pgvector cosine distance; higher = more similar)
+# best_score >= 0.45 => strong PDF-only answering
+RAG_HIGH_CONFIDENCE_SCORE = 0.45
+# best_score < 0.25 => strict refusal (no LLM)
+RAG_MIN_RELEVANCE_THRESHOLD = 0.25
+# Merged/usable context must be at least this long or we treat as no usable evidence.
+RAG_MIN_CONTEXT_CHARS = 80
+PDF_ONLY_REFUSAL_MESSAGE = (
+    "Sorry, I can only answer based on the available PDF study materials."
+)
+
 
 def _safe_int(value, default: int = 0) -> int:
     """Safely convert a value to int, returning default on failure."""
@@ -269,187 +268,629 @@ def _merge_and_clean_content(relevant_docs: list) -> str:
     return "\n\n".join(combined_content)
 
 
+def _context_from_relevant_docs(relevant_docs: list) -> str:
+    """Build LLM context from chunks; prefers merged/cleaned text, falls back to raw page_content."""
+    merged = _merge_and_clean_content(relevant_docs)
+    if (merged or "").strip():
+        return merged
+    parts = []
+    for doc, _score in sorted(relevant_docs, key=lambda x: x[1], reverse=True):
+        raw = (getattr(doc, "page_content", None) or "").strip()
+        if raw:
+            parts.append(raw)
+    return "\n\n".join(parts)[:12000]
+
+
 def _get_or_create_conversation_chain(session_id: str, vector_store):
-    """Get or create a conversation chain for the given session."""
-    if get_conversational_chain is None:
-        raise RuntimeError("get_conversational_chain is not available - import failed")
-    
-    if session_id not in _conversation_chains:
-        _conversation_chains[session_id] = get_conversational_chain(
-            vector_store=vector_store,
-            temperature=0.2,
-            k=5
-        )
-    return _conversation_chains[session_id]
+    """Compatibility wrapper around extracted session memory helper."""
+    return _session_get_or_create_conversation_chain(session_id, vector_store)
 
 
 def _clear_conversation_chain(session_id: str):
-    """
-    Clear conversation chain for a session (when chat is cleared).
-    """
-    if session_id in _conversation_chains:
-        del _conversation_chains[session_id]
+    """Compatibility wrapper around extracted session memory helper."""
+    return _session_clear_conversation_chain(session_id)
+
+async def _dispatch_chat_tracking(
+    *,
+    user_id: str,
+    session_id: str,
+    query_text: str,
+    answer: str,
+    query_embedding,
+    sources: list,
+):
+    """Compatibility wrapper around extracted tracking dispatcher."""
+    # Preserve test compatibility: many tests patch app.api.routes.chat.store_chat_interaction.
+    # Forward that patched symbol into the extracted tracking module before dispatch.
+    _chat_tracking_module.store_chat_interaction = store_chat_interaction
+    await _tracking_dispatch_chat_tracking(
+        user_id=user_id,
+        session_id=session_id,
+        query_text=query_text,
+        answer=answer,
+        query_embedding=query_embedding,
+        sources=sources,
+    )
 
 
-def _format_educational_response(response_text: str, query: str) -> str:
-    """
-    Format any response into a structured educational format.
-    Ensures consistent formatting across all response types.
-    """
+def _load_vector_store():
+    """Load and cache the shared vector store instance."""
     try:
-        from langchain_openai import ChatOpenAI
-        from langchain.schema import HumanMessage, SystemMessage
-        
-        # Create system prompt for formatting responses
-        system_prompt = """You are an expert programming instructor. Your job is to format responses into a clear, educational structure that helps students learn effectively.
-
-FORMATTING RULES:
-1. ALWAYS structure the response with these sections (skip sections if content doesn't allow):
-   - **Explanation:** [Clear, concise explanation of the concept]
-   - **Example:** [Practical example or code snippet if available - skip if no example possible]
-   - **Key Points:** [5-7 bullet points summarizing the most important concepts]
-
-2. Use simple, clear language appropriate for students
-3. Make explanations engaging and educational
-4. If the response already has good structure, preserve it but ensure consistency
-5. If the response is poorly structured, reformat it completely
-6. Ensure proper spacing between sections
-7. Use bullet points (•) for key points
-8. Format code blocks properly with triple backticks
-9. Keep explanations concise but complete
-
-RESPONSE TO FORMAT:
-{response_text}
-
-ORIGINAL QUERY:
-{query}
-
-Remember: Make this response clear, educational, and well-structured for students!"""
-
-        # Create the LLM instance
-        llm = ChatOpenAI(model=settings.LLM_MODEL, temperature=0.1)
-        
-        # Generate formatted response
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Format this response: {response_text}")
-        ]
-        
-        formatted_response = llm.invoke(messages)
-        return formatted_response.content
-        
+        global _global_vector_store
+        if _global_vector_store is None:
+            if load_supabase_vectorstore is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Vector store service is not available - import failed"
+                )
+            if settings.is_development:
+                logger.info("Loading vector store...")
+            _global_vector_store = load_supabase_vectorstore()
+            if settings.is_development:
+                logger.info("Vector store loaded successfully")
+        return _global_vector_store
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error formatting educational response: {e}")
-        # Fallback: return original response with basic formatting
-        return f"**Explanation:**\n{response_text}\n\n**Key Points:**\n• Please refer to the explanation above for key concepts"
+        logger.exception("Failed to load vectorstore: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Vector store unavailable"
+        )
+
+
+def handle_query_embedding(request, vs):
+    """Validate the query, detect follow-ups, and compute the query embedding."""
+    if settings.is_development:
+        logger.info("Performing similarity search for query: %s", request.query)
+    from app.services.embedding_manager import get_embeddings_instance
+
+    if not request.query or not str(request.query).strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Query text must not be empty"
+        )
+
+    session_id = request.conversation_id or str(uuid.uuid4())
+    follow_up_keywords = [
+        'explain more', 'tell me more', 'give more', 'add more', 'show more',
+        'can you explain', 'elaborate', 'expand on', 'go into detail',
+        'more examples', 'more code', 'more details', 'further explanation',
+        'what else', 'anything else', 'other examples', 'additional',
+        'give some more', 'show some more', 'provide more',
+        'can you explain more', 'show some examples', 'explain clearly',
+        'give more details', 'show more codes', 'expand on this', 'explain in detail'
+    ]
+
+    is_follow_up = any(keyword in request.query.lower() for keyword in follow_up_keywords)
+    search_query = request.query
+
+    if settings.is_development:
+        logger.info(f"Query: '{request.query}' - Follow-up detected: {is_follow_up}")
+
+    conversation_chain = None
+    if is_follow_up:
+        if settings.is_development:
+            logger.info(f"Follow-up question detected: {request.query}")
+        try:
+            conversation_chain = _get_or_create_conversation_chain(session_id, vs)
+            memory = conversation_chain.memory
+            chat_history = memory.chat_memory.messages
+
+            if len(chat_history) >= 2:
+                last_user_msg = None
+                last_bot_msg = None
+
+                for i in range(len(chat_history) - 1, -1, -1):
+                    msg = chat_history[i]
+                    if hasattr(msg, 'content'):
+                        if last_bot_msg is None and hasattr(msg, '__class__') and 'AI' in str(msg.__class__):
+                            last_bot_msg = msg.content
+                        elif last_user_msg is None and hasattr(msg, '__class__') and 'Human' in str(msg.__class__):
+                            last_user_msg = msg.content
+                            break
+
+                if last_user_msg and last_bot_msg:
+                    search_query = f"{last_user_msg} | {request.query}"
+        except Exception as e:
+            logger.error(f"Error getting conversation context for follow-up: {e}")
+
+    try:
+        api_key = settings.OPENAI_API_KEY
+        if not api_key or not api_key.strip():
+            raise ValueError("OPENAI_API_KEY is empty or not set in .env file")
+
+        if not api_key.startswith("sk-"):
+            raise ValueError(f"OPENAI_API_KEY format is invalid (should start with 'sk-', got: {api_key[:10]}...)")
+
+        if not os.environ.get("OPENAI_API_KEY"):
+            os.environ["OPENAI_API_KEY"] = api_key
+        if settings.is_development:
+            logger.info("OPENAI_API_KEY set in environment from settings")
+
+        if settings.is_development:
+            logger.info(f"Generating embedding for query: '{search_query[:50]}...'")
+
+        embeddings = get_embeddings_instance()
+        query_embedding = embeddings.embed_query(search_query)
+
+        if not query_embedding or len(query_embedding) == 0:
+            raise ValueError("Embedding generation returned empty result")
+
+        return {
+            "session_id": session_id,
+            "is_follow_up": is_follow_up,
+            "conversation_chain": conversation_chain,
+            "query_embedding": query_embedding,
+        }
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        error_msg = str(ve)
+        logger.error(f"Embedding validation error: {error_msg}")
+
+        if "OPENAI_API_KEY" in error_msg or "API key" in error_msg or "empty" in error_msg.lower():
+            detail_msg = f"OpenAI API key configuration error: {error_msg}. Please check your OPENAI_API_KEY in .env file."
+        else:
+            detail_msg = f"Embedding validation failed: {error_msg}"
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail_msg
+        )
+    except Exception as embed_err:
+        import traceback
+        error_str = str(embed_err)
+        error_traceback = traceback.format_exc()
+
+        logger.exception(f"Failed to generate embeddings: {type(embed_err).__name__}: {error_str}")
+        if settings.is_development:
+            logger.error(f"Full traceback:\n{error_traceback}")
+
+        api_key_issue = False
+        network_issue = False
+        rate_limit_issue = False
+
+        if "401" in error_str or "invalid" in error_str.lower() or "api key" in error_str.lower() or "authentication" in error_str.lower():
+            api_key_issue = True
+            logger.error("CRITICAL: OpenAI API key appears to be invalid or expired")
+        elif "connection" in error_str.lower() or "timeout" in error_str.lower() or "network" in error_str.lower() or "connect" in error_str.lower():
+            network_issue = True
+            logger.error("CRITICAL: Network issue connecting to OpenAI API")
+        elif "rate limit" in error_str.lower() or "429" in error_str or "quota" in error_str.lower():
+            rate_limit_issue = True
+            logger.error("CRITICAL: OpenAI API rate limit or quota exceeded")
+
+        if api_key_issue:
+            detail_msg = "OpenAI API key is invalid or expired. Please check your OPENAI_API_KEY in .env file and ensure it's valid."
+        elif network_issue:
+            detail_msg = "Unable to connect to OpenAI API. Please check your network connection and try again."
+        elif rate_limit_issue:
+            detail_msg = "OpenAI API rate limit exceeded. Please wait a few minutes and try again."
+        else:
+            if settings.is_development:
+                detail_msg = f"Embeddings service error: {error_str[:200]}"
+            else:
+                detail_msg = "Embeddings service temporarily unavailable. Please try again later."
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail_msg
+        )
+
+
+def handle_retrieval(request, vs, query_embedding):
+    """Run retrieval and calculate threshold values for downstream gating."""
+    docs_with_scores = vs.similarity_search_by_vector_with_relevance_scores(
+        query_embedding, k=max(request.top_k or 10, 10)
+    )
+
+    if settings.is_development:
+        logger.info("Found %d relevant documents", len(docs_with_scores))
+
+    retrieval_best = (
+        max(score for _, score in docs_with_scores) if docs_with_scores else None
+    )
+    retrieval_used_degraded_fallback = any(
+        bool((getattr(doc, "metadata", None) or {}).get("retrieval_degraded"))
+        for doc, _score in docs_with_scores
+    )
+    effective_min_relevance_threshold = (
+        max(RAG_MIN_RELEVANCE_THRESHOLD, 0.35)
+        if retrieval_used_degraded_fallback
+        else RAG_MIN_RELEVANCE_THRESHOLD
+    )
+    effective_high_confidence_score = (
+        max(RAG_HIGH_CONFIDENCE_SCORE, 0.50)
+        if retrieval_used_degraded_fallback
+        else RAG_HIGH_CONFIDENCE_SCORE
+    )
+
+    if settings.is_development and docs_with_scores:
+        scores = [score for _, score in docs_with_scores]
+        logger.info(
+            f"Retrieved {len(docs_with_scores)} documents. "
+            f"Score range: min={min(scores):.3f}, max={max(scores):.3f}, "
+            f"avg={sum(scores)/len(scores):.3f}"
+        )
+
+    return {
+        "docs_with_scores": docs_with_scores,
+        "retrieval_best": retrieval_best,
+        "retrieval_used_degraded_fallback": retrieval_used_degraded_fallback,
+        "effective_min_relevance_threshold": effective_min_relevance_threshold,
+        "effective_high_confidence_score": effective_high_confidence_score,
+    }
+
+
+def apply_gating_logic(docs_with_scores, retrieval_best, effective_min_relevance_threshold, effective_high_confidence_score):
+    """Filter retrieved docs into strong/medium evidence and apply refusal gating."""
+    relevant_docs = []
+    medium_confidence_docs = []
+
+    for doc, score in docs_with_scores:
+        if score >= effective_high_confidence_score:
+            relevant_docs.append((doc, score))
+        elif score >= effective_min_relevance_threshold:
+            medium_confidence_docs.append((doc, score))
+
+    if not relevant_docs and medium_confidence_docs:
+        relevant_docs = medium_confidence_docs[:3]
+        if settings.is_development:
+            logger.info(
+                "Using %d medium-confidence documents (scores in [%.2f, %.2f))",
+                len(relevant_docs),
+                effective_min_relevance_threshold,
+                effective_high_confidence_score,
+            )
+    elif not relevant_docs and docs_with_scores and retrieval_best is not None:
+        if retrieval_best >= effective_min_relevance_threshold:
+            sorted_all = sorted(docs_with_scores, key=lambda x: x[1], reverse=True)
+            relevant_docs = sorted_all[:3]
+            if settings.is_development:
+                logger.info(
+                    "Balanced fallback: using top %d docs (best score %.3f)",
+                    len(relevant_docs),
+                    retrieval_best,
+                )
+
+    if relevant_docs:
+        top_doc, top_score = relevant_docs[0]
+        top_metadata = getattr(top_doc, "metadata", {}) or {}
+        top_source_type = top_metadata.get("source_type")
+
+        if top_source_type == "pdf":
+            pdf_id = top_metadata.get("pdf_id")
+            if pdf_id:
+                additional_chunks = []
+                seen_chunk_keys = set()
+                for existing_doc, _existing_score in relevant_docs:
+                    existing_md = getattr(existing_doc, "metadata", {}) or {}
+                    seen_chunk_keys.add((
+                        existing_md.get("pdf_id"),
+                        existing_md.get("chunk_id"),
+                        existing_md.get("page_number"),
+                    ))
+                for doc, score in docs_with_scores:
+                    md = getattr(doc, "metadata", {}) or {}
+                    chunk_key = (
+                        md.get("pdf_id"),
+                        md.get("chunk_id"),
+                        md.get("page_number"),
+                    )
+                    if (md.get("source_type") == "pdf" and
+                        md.get("pdf_id") == pdf_id and
+                        score >= effective_min_relevance_threshold and
+                        chunk_key not in seen_chunk_keys):
+                        additional_chunks.append((doc, score))
+                        seen_chunk_keys.add(chunk_key)
+
+                if additional_chunks:
+                    additional_chunks.sort(key=lambda x: (
+                        _safe_int(getattr(x[0], "metadata", {}).get("page_number"), 0),
+                        _safe_int(getattr(x[0], "metadata", {}).get("chunk_id"), 0)
+                    ))
+                    relevant_docs.extend(additional_chunks[:8])
+
+    if settings.is_development:
+        logger.info(
+            f"After threshold filtering: {len(relevant_docs)} relevant docs, "
+            f"{len(docs_with_scores)} total retrieved"
+        )
+        if relevant_docs:
+            best_score_after_filter = max(score for _, score in relevant_docs)
+            logger.info(f"Best score after filtering: {best_score_after_filter:.3f}")
+        elif docs_with_scores:
+            best_score_all = max(score for _, score in docs_with_scores)
+            logger.warning(
+                "All documents filtered out by min relevance. Best score was %.3f "
+                "(min=%.2f)",
+                best_score_all,
+                effective_min_relevance_threshold,
+            )
+
+    if not docs_with_scores:
+        logger.warning(
+            "RAG refusal: docs_with_scores empty (vector RPC/fallback returned nothing). "
+            "Check Supabase pdf_embeddings, match_pdf_embeddings, embedding dimensions."
+        )
+        return {
+            "answer": PDF_ONLY_REFUSAL_MESSAGE,
+            "sources": [],
+            "relevant_docs": relevant_docs,
+            "should_refuse": True,
+        }
+    if retrieval_best is None or retrieval_best < effective_min_relevance_threshold:
+        logger.warning(
+            "RAG refusal: insufficient similarity (out-of-scope). chunks=%d best=%.4f min=%.2f",
+            len(docs_with_scores),
+            retrieval_best if retrieval_best is not None else 0.0,
+            effective_min_relevance_threshold,
+        )
+        return {
+            "answer": PDF_ONLY_REFUSAL_MESSAGE,
+            "sources": [],
+            "relevant_docs": relevant_docs,
+            "should_refuse": True,
+        }
+    if not relevant_docs:
+        logger.warning(
+            "RAG refusal: relevant_docs empty despite %d retrieved chunks (best=%s)",
+            len(docs_with_scores),
+            f"{retrieval_best:.4f}" if retrieval_best is not None else "n/a",
+        )
+        return {
+            "answer": PDF_ONLY_REFUSAL_MESSAGE,
+            "sources": [],
+            "relevant_docs": relevant_docs,
+            "should_refuse": True,
+        }
+
+    return {
+        "relevant_docs": relevant_docs,
+        "should_refuse": False,
+        "is_hybrid_context": retrieval_best < effective_high_confidence_score,
+    }
+
+
+def generate_answer(request, relevant_docs, retrieval_best, effective_high_confidence_score, conversation_chain, session_id, vs, is_follow_up):
+    """Generate the grounded answer from curated context."""
+    best_score = max(score for _, score in relevant_docs)
+    is_hybrid_context = retrieval_best < effective_high_confidence_score
+
+    if conversation_chain is None:
+        conversation_chain = _get_or_create_conversation_chain(session_id, vs)
+
+    try:
+        context = _context_from_relevant_docs(relevant_docs)
+        topic_hint = _follow_up_topic_hint(conversation_chain) if is_follow_up else "\n"
+
+        if not relevant_docs:
+            answer = PDF_ONLY_REFUSAL_MESSAGE
+        elif len((context or "").strip()) < RAG_MIN_CONTEXT_CHARS:
+            logger.warning(
+                "RAG refusal: usable context too short (%d chars, min=%d)",
+                len((context or "").strip()),
+                RAG_MIN_CONTEXT_CHARS,
+            )
+            answer = PDF_ONLY_REFUSAL_MESSAGE
+        elif is_hybrid_context:
+            raw_answer = _generate_context_grounded_response(
+                request.query,
+                context,
+                is_hybrid_context=True,
+                is_follow_up=is_follow_up,
+                topic_hint=topic_hint,
+            )
+            _refusal_exact = (raw_answer or "").strip() == PDF_ONLY_REFUSAL_MESSAGE.strip()
+            if _refusal_exact:
+                answer = PDF_ONLY_REFUSAL_MESSAGE
+            else:
+                answer = _format_educational_response(
+                    raw_answer,
+                    request.query,
+                    has_relevant_docs=True,
+                    hybrid_weak_context=True,
+                )
+        elif is_follow_up:
+            raw_answer = _generate_context_grounded_response(
+                request.query,
+                context,
+                is_hybrid_context=False,
+                is_follow_up=True,
+                topic_hint=topic_hint,
+            )
+            if (raw_answer or "").strip() == PDF_ONLY_REFUSAL_MESSAGE.strip():
+                answer = PDF_ONLY_REFUSAL_MESSAGE
+            else:
+                answer = _format_educational_response(raw_answer, request.query, has_relevant_docs=True)
+        else:
+            raw_answer = _generate_context_grounded_response(
+                request.query,
+                context,
+                is_hybrid_context=False,
+                is_follow_up=False,
+                topic_hint=topic_hint,
+            )
+            if (raw_answer or "").strip() == PDF_ONLY_REFUSAL_MESSAGE.strip():
+                answer = PDF_ONLY_REFUSAL_MESSAGE
+            else:
+                answer = _format_educational_response(raw_answer, request.query, has_relevant_docs=True)
+
+        try:
+            if conversation_chain is not None and hasattr(conversation_chain, "memory"):
+                memory = conversation_chain.memory
+                if hasattr(memory, "chat_memory"):
+                    memory.chat_memory.add_user_message(request.query)
+                    memory.chat_memory.add_ai_message(answer)
+        except Exception as memory_error:
+            logger.warning("Failed to update conversation memory: %s", memory_error)
+
+        return {
+            "answer": answer,
+            "conversation_chain": conversation_chain,
+            "best_score": best_score,
+            "is_hybrid_context": is_hybrid_context,
+        }
+    except Exception as e:
+        logger.error(f"Error generating direct context-grounded response: {e}")
+        try:
+            if is_hybrid_context and relevant_docs:
+                raw_answer = _generate_weak_hybrid_response(request.query, relevant_docs)
+                if (raw_answer or "").strip() == PDF_ONLY_REFUSAL_MESSAGE.strip():
+                    answer = PDF_ONLY_REFUSAL_MESSAGE
+                else:
+                    answer = _format_educational_response(
+                        raw_answer,
+                        request.query,
+                        has_relevant_docs=True,
+                        hybrid_weak_context=True,
+                    )
+            elif relevant_docs:
+                raw_answer = _generate_clarification_response(request.query, relevant_docs)
+                answer = _format_educational_response(
+                    raw_answer, request.query, has_relevant_docs=True
+                )
+            else:
+                answer = PDF_ONLY_REFUSAL_MESSAGE
+        except Exception as fallback_error:
+            logger.error(f"Error in fallback response: {fallback_error}")
+            if relevant_docs:
+                answer = "I found relevant documents but encountered an error processing them. Please try rephrasing your question."
+            else:
+                answer = PDF_ONLY_REFUSAL_MESSAGE
+
+        return {
+            "answer": answer,
+            "conversation_chain": conversation_chain,
+            "best_score": best_score,
+            "is_hybrid_context": is_hybrid_context,
+        }
+
+
+def build_sources(request, relevant_docs, effective_min_relevance_threshold, answer):
+    """Build the response sources from the filtered relevant docs."""
+    sources = []
+    if request.include_sources and relevant_docs and answer != PDF_ONLY_REFUSAL_MESSAGE:
+        seen = set()
+        sorted_docs = sorted(relevant_docs, key=lambda x: x[1], reverse=True)
+        for doc, score in sorted_docs:
+            if score < effective_min_relevance_threshold:
+                continue
+            md = getattr(doc, "metadata", None) or {}
+            src_type = md.get("source_type", "pdf")
+            if src_type != "pdf":
+                continue
+            key = (md.get("pdf_id"), md.get("chunk_id"), md.get("page_number"))
+            if key in seen:
+                continue
+            seen.add(key)
+            source_name = md.get("pdf_title", "Unknown PDF")
+            sources.append({
+                "source_type": "pdf",
+                "pdf_title": source_name,
+                "pdf_id": md.get("pdf_id"),
+                "page_number": md.get("page_number"),
+                "chunk_id": md.get("chunk_id"),
+                "relevance_score": score,
+                "source_name": source_name
+            })
+    return sources
+
+
+async def dispatch_tracking(*, request, session_id, answer, query_embedding, sources):
+    """Thin wrapper to keep the route orchestration readable."""
+    await _dispatch_chat_tracking(
+        user_id=request.user_id or "anonymous",
+        session_id=session_id,
+        query_text=request.query,
+        answer=answer,
+        query_embedding=query_embedding,
+        sources=sources,
+    )
+
+
+def _build_chat_response(*, answer, sources, session_id, processing_time, timestamp=None):
+    """Create a ChatResponse while preserving current response fields."""
+    payload = dict(
+        answer=answer,
+        sources=sources,
+        conversation_id=session_id,
+        processing_time=processing_time,
+    )
+    if timestamp is not None:
+        payload["timestamp"] = timestamp
+    else:
+        payload["tokens_used"] = None
+    return ChatResponse(**payload)
+
+
+def _follow_up_topic_hint(conversation_chain) -> str:
+    return _generation_follow_up_topic_hint(conversation_chain)
+
+
+def _looks_already_structured(response_text: str) -> bool:
+    return _generation_looks_already_structured(response_text)
+
+
+def _format_educational_response(
+    response_text: str,
+    query: str,
+    has_relevant_docs: bool = True,
+    hybrid_weak_context: bool = False,
+) -> str:
+    return _generation_format_educational_response(
+        response_text,
+        query,
+        has_relevant_docs=has_relevant_docs,
+        hybrid_weak_context=hybrid_weak_context,
+    )
 
 
 # Video-based response function removed - PDF-only mode
 # Using _generate_clarification_response for all content-based responses
 
 
+def build_grounded_prompt(
+    mode: str,
+    context: str,
+    query: str,
+    *,
+    topic_hint: str = "\n",
+    is_follow_up: bool = False,
+) -> str:
+    return _generation_build_grounded_prompt(
+        mode,
+        context,
+        query,
+        topic_hint=topic_hint,
+        is_follow_up=is_follow_up,
+    )
+
+
 def _generate_clarification_response(query: str, relevant_docs: list) -> str:
-    """
-    Generate a detailed clarification response for students who need extra explanation.
-    Uses comprehensive teaching-style approach with step-by-step breakdowns.
-    """
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain.schema import HumanMessage, SystemMessage
-        
-        # Merge and clean content from all relevant documents
-        context = _merge_and_clean_content(relevant_docs)
-        
-        # Create enhanced system prompt for detailed clarification
-        system_prompt = """You are an expert programming instructor helping a student who needs extra clarification. Your goal is to make complex concepts crystal clear through detailed, step-by-step explanations using ONLY the course materials provided.
-
-🎯 **CLARIFICATION MISSION:**
-This student specifically asked for clarification, so they need extra help, encouragement, and detailed explanations.
-
-📋 **TEACHING APPROACH:**
-1. **Use ONLY the information from the provided course materials below**
-2. **Break down the concept into simple, digestible steps**
-3. **Use analogies and real-world examples** when helpful
-4. **Use encouraging, supportive language** throughout
-5. **Include practical code examples with detailed comments**
-6. **Address common student misconceptions** about this topic
-7. **Focus on clear, detailed explanations** that build understanding
-8. **Structure your response with clear sections:**
-   - **What is it?** Simple, clear definition
-   - **How does it work?** Step-by-step breakdown
-   - **Step-by-step Example:** Detailed example with code
-   - **Why is it important?** Practical applications and benefits
-   - **Key Takeaway:** Summary and encouragement
-
-📚 **COURSE MATERIALS TO USE:**
-{context}
-
-🎓 **STUDENT-FOCUSED CLARIFICATION:**
-- Think like a patient teaching assistant who loves helping students
-- Use "Let's break this down together" approach
-- Provide multiple examples if available in the materials
-- Explain the "why" behind each step
-- Encourage questions and further learning
-- Make complex concepts feel approachable
-
-Remember: This student asked for clarification, so they need extra help, encouragement, and comprehensive explanations!"""
-
-        # Create the LLM instance with higher temperature for more creative explanations
-        llm = ChatOpenAI(model=settings.LLM_MODEL, temperature=0.4)
-        
-        # Generate comprehensive clarification response
-        messages = [
-            SystemMessage(content=system_prompt.format(context=context)),
-            HumanMessage(content=query)
-        ]
-        
-        response = llm.invoke(messages)
-        return response.content
-        
-    except Exception as e:
-        logger.error(f"Error generating clarification response: {e}")
-        return "I found relevant content but encountered an error explaining it. Please try rephrasing your question."
+    return _generation_generate_clarification_response(query, relevant_docs)
 
 
-def _generate_llm_fallback_response(query: str, topic_context: str = None) -> str:
-    """
-    Generate a complete, structured fallback response when PDF content is insufficient.
-    Uses last topic context (if available) to stay on-topic and provide a thorough, educational answer.
-    """
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain.schema import HumanMessage, SystemMessage
+def _generate_weak_hybrid_response(query: str, relevant_docs: list) -> str:
+    return _generation_generate_weak_hybrid_response(query, relevant_docs)
 
-        system_prompt = """You are an expert programming instructor. No course materials were found for this query.
 
-Your task is to provide a complete, accurate, and student-friendly answer that is TOPIC-APPROPRIATE based on the last discussed topic if provided. Do not hallucinate specifics about the student's PDFs. Instead, teach the topic clearly and thoroughly.
-
-Rules:
-1) Stay aligned with the topic context below (if present). Do not drift topics.
-2) Provide a full explanation suitable for students at a coding institute.
-3) Include multiple practical code examples when asked to "show examples" or "show codes".
-4) Keep terminology standard and best-practice oriented.
-5) Never contradict any provided topic context; if something is uncertain, omit it.
-6) Always structure the response with: Explanation, Example, Key Points.
-
-Topic Context (may be empty): {topic_context}
-"""
-
-        llm = ChatOpenAI(model=settings.LLM_MODEL, temperature=0.3)
-        messages = [
-            SystemMessage(content=system_prompt.format(topic_context=topic_context or "")),
-            HumanMessage(content=query)
-        ]
-        resp = llm.invoke(messages)
-        content = resp.content
-        return _format_educational_response(content, query)
-    except Exception as e:
-        logger.error(f"Error in LLM fallback response: {e}")
-        return _format_educational_response(
-            "I will explain this topic clearly and completely based on general best practices, even though your uploaded materials did not contain it.",
-            query
-        )
-
+def _generate_context_grounded_response(
+    query: str,
+    context: str,
+    *,
+    is_hybrid_context: bool = False,
+    is_follow_up: bool = False,
+    topic_hint: str = "\n",
+) -> str:
+    return _generation_generate_context_grounded_response(
+        query,
+        context,
+        is_hybrid_context=is_hybrid_context,
+        is_follow_up=is_follow_up,
+        topic_hint=topic_hint,
+    )
 
 # =========================================
 # Session Management Endpoints
@@ -602,97 +1043,6 @@ async def end_session(request_data: dict = Body(...)):
         )
 
 
-@router.get("/session/validate/{session_id}")
-async def validate_session(session_id: str):
-    """
-    Validate if a session is active.
-    
-    This endpoint can be used by frontend to:
-    - Check if current session is still valid
-    - Determine if new session is needed
-    - Handle session expiration gracefully
-    
-    Args:
-        session_id: Session identifier to validate
-        
-    Returns:
-        Validation result with session status
-        
-    Example:
-        GET /chat/session/validate/uuid-string
-        Response: {
-            "valid": true,
-            "session_id": "uuid-string",
-            "is_active": true
-        }
-    """
-    try:
-        # Check if session management is available
-        if is_session_active is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Session management service is not available"
-            )
-        
-        # Check if the session is active (using session_id only)
-        is_valid = is_session_active(session_id)
-        
-        return {
-            "valid": is_valid,
-            "session_id": session_id,
-            "is_active": is_valid,
-            "message": "Session is active" if is_valid else "Session is inactive or does not exist"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error validating session: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error validating session: {str(e)}"
-        )
-
-
-@router.get("/query")
-async def query_chat_info():
-    """
-    Information endpoint for chat query.
-    Returns usage instructions when accessed via GET.
-    
-    Returns:
-        JSON with usage information and example
-    """
-    return {
-        "message": "Chat query endpoint",
-        "description": "To query the chatbot, use POST /chat/query with a JSON body",
-        "method": "POST",
-        "endpoint": "/chat/query",
-        "example": {
-            "request": {
-                "query": "What is Python?",
-                "user_id": "user123",
-                "conversation_id": "conv456",
-                "top_k": 5,
-                "include_sources": True
-            }
-        },
-        "required_fields": {
-            "request": {
-                "query": "Your question (string, required)",
-                "user_id": "User identifier (string, optional)"
-            }
-        },
-        "optional_fields": {
-            "request": {
-                "conversation_id": "Conversation session ID (string, optional)",
-                "top_k": "Number of results to retrieve (integer, default: 10)",
-                "include_sources": "Include source documents in response (boolean, default: true)"
-            }
-        },
-        "note": "This endpoint uses POST method. Use GET only to view this information."
-    }
-
 # Define endpoint - conditionally add response_model to prevent crashes
 # FastAPI doesn't accept None for response_model, so we use a wrapper
 def _create_query_endpoint():
@@ -736,10 +1086,6 @@ async def _query_chat_handler(request_data: dict):
     if load_supabase_vectorstore is None:
         logger.error("load_supabase_vectorstore is None - vector_store failed to import")
         missing_services.append("vector_store")
-    
-    if get_conversational_chain is None:
-        logger.error("get_conversational_chain is None - retriever_chain failed to import")
-        missing_services.append("retriever_chain")
     
     # Check environment variables
     import os
@@ -803,7 +1149,7 @@ async def _query_chat_handler(request_data: dict):
         # Session Validation & Management
         # =========================================
         
-        # Extract session_id (user_id is ignored for session management, kept for chat_history)
+        # Extract session_id (user_id is ignored for session management, kept for chatbot_chat_history)
         user_id = request.user_id or "anonymous"
         session_id = request.conversation_id
         
@@ -915,474 +1261,84 @@ async def _query_chat_handler(request_data: dict):
             ]
             import random
             answer = random.choice(greeting_responses)
-            
-            # Store the greeting interaction
-            try:
-                session_id = request.conversation_id or str(uuid.uuid4())
-                chat_id = store_chat_interaction(
-                    user_id=request.user_id or "anonymous",
-                    session_id=session_id,
-                    user_message=request.query,
-                    bot_response=answer,
-                    video_id=None  # PDF-only mode - video_id not used
-                )
-                if settings.is_development:
-                    logger.info(f"Greeting interaction stored with ID: {chat_id}")
-            except Exception as e:
-                logger.error(f"Error storing greeting interaction: {e}")
-            
-            return ChatResponse(
+            session_id = request.conversation_id or str(uuid.uuid4())
+
+            await dispatch_tracking(
+                request=request,
+                session_id=session_id,
+                answer=answer,
+                query_embedding=None,
+                sources=[],
+            )
+
+            return _build_chat_response(
                 answer=answer,
                 sources=[],
-                conversation_id=session_id,
+                session_id=session_id,
                 processing_time=0.1,
-                timestamp=time.time()
+                timestamp=time.time(),
             )
 
         # Initialize answer and sources early to ensure they're always defined
         answer = "I'm sorry, but I encountered an error processing your query. Please try again."
         sources = []
         session_id = request.conversation_id or str(uuid.uuid4())
+        query_embedding = None
         
-        # Load vector store for PDF content queries
-        try:
-            global _global_vector_store
-            if _global_vector_store is None:
-                if load_supabase_vectorstore is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Vector store service is not available - import failed"
-                    )
-                if settings.is_development:
-                    logger.info("Loading vector store...")
-                _global_vector_store = load_supabase_vectorstore()
-                if settings.is_development:
-                    logger.info("Vector store loaded successfully")
-            vs = _global_vector_store
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception("Failed to load vectorstore: %s", str(e))
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Vector store unavailable"
-            )
+        vs = _load_vector_store()
 
         # First, perform similarity search to check if relevant content exists
         try:
-            if settings.is_development:
-                logger.info("Performing similarity search for query: %s", request.query)
-            from app.services.embedding_manager import get_embeddings_instance
+            embedding_result = handle_query_embedding(request, vs)
+            session_id = embedding_result["session_id"]
+            is_follow_up = embedding_result["is_follow_up"]
+            conversation_chain = embedding_result["conversation_chain"]
+            query_embedding = embedding_result["query_embedding"]
 
-            # Basic input validation to avoid passing empty queries downstream
-            if not request.query or not str(request.query).strip():
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Query text must not be empty"
+            retrieval_result = handle_retrieval(request, vs, query_embedding)
+            docs_with_scores = retrieval_result["docs_with_scores"]
+            retrieval_best = retrieval_result["retrieval_best"]
+            retrieval_used_degraded_fallback = retrieval_result["retrieval_used_degraded_fallback"]
+            effective_min_relevance_threshold = retrieval_result["effective_min_relevance_threshold"]
+            effective_high_confidence_score = retrieval_result["effective_high_confidence_score"]
+
+            if settings.is_development and retrieval_used_degraded_fallback:
+                logger.warning(
+                    "Retrieval is using DEGRADED fallback candidates; applying stricter gating "
+                    "(min=%.2f, strong=%.2f) to avoid random answers.",
+                    effective_min_relevance_threshold,
+                    effective_high_confidence_score,
                 )
 
-            # Generate session_id early for use in follow-up detection
-            session_id = request.conversation_id or str(uuid.uuid4())
-            
-            # Check if this is a follow-up question that needs context from previous conversation
-            follow_up_keywords = [
-                'explain more', 'tell me more', 'give more', 'add more', 'show more',
-                'can you explain', 'elaborate', 'expand on', 'go into detail',
-                'more examples', 'more code', 'more details', 'further explanation',
-                'what else', 'anything else', 'other examples', 'additional',
-                'give some more', 'show some more', 'provide more',
-                # Added explicit clarification/follow-ups
-                'can you explain more', 'show some examples', 'explain clearly',
-                'give more details', 'show more codes', 'expand on this', 'explain in detail'
-            ]
-            
-            is_follow_up = any(keyword in request.query.lower() for keyword in follow_up_keywords)
-            search_query = request.query
-            
-            if settings.is_development:
-                logger.info(f"Query: '{request.query}' - Follow-up detected: {is_follow_up}")
-            
-            # Initialize conversation chain variable
-            conversation_chain = None
-            
-            # If it's a follow-up question, try to get context from conversation memory
-            if is_follow_up:
-                if settings.is_development:
-                    logger.info(f"Follow-up question detected: {request.query}")
-                try:
-                    conversation_chain = _get_or_create_conversation_chain(session_id, vs)
-                    memory = conversation_chain.memory
-                    chat_history = memory.chat_memory.messages
-                    
-                    if len(chat_history) >= 2:
-                        last_user_msg = None
-                        last_bot_msg = None
-                        
-                        for i in range(len(chat_history) - 1, -1, -1):
-                            msg = chat_history[i]
-                            if hasattr(msg, 'content'):
-                                if last_bot_msg is None and hasattr(msg, '__class__') and 'AI' in str(msg.__class__):
-                                    last_bot_msg = msg.content
-                                elif last_user_msg is None and hasattr(msg, '__class__') and 'Human' in str(msg.__class__):
-                                    last_user_msg = msg.content
-                                    break
-                        
-                        if last_user_msg and last_bot_msg:
-                            search_query = f"{last_user_msg} | {request.query}"
-                except Exception as e:
-                    logger.error(f"Error getting conversation context for follow-up: {e}")
-            
-            # Generate embedding for the search query (either original or previous topic)
-            try:
-                # Verify API key is available before attempting embedding generation
-                api_key = settings.OPENAI_API_KEY
-                if not api_key or not api_key.strip():
-                    raise ValueError("OPENAI_API_KEY is empty or not set in .env file")
-                
-                if not api_key.startswith("sk-"):
-                    raise ValueError(f"OPENAI_API_KEY format is invalid (should start with 'sk-', got: {api_key[:10]}...)")
-                
-                # Ensure API key is set in environment (required by LangChain)
-                import os
-                if not os.environ.get("OPENAI_API_KEY"):
-                    os.environ["OPENAI_API_KEY"] = api_key
-                if settings.is_development:
-                    logger.info("OPENAI_API_KEY set in environment from settings")
-                
-                if settings.is_development:
-                    logger.info(f"Generating embedding for query: '{search_query[:50]}...'")
-                
-                embeddings = get_embeddings_instance()
-                query_embedding = embeddings.embed_query(search_query)
-                
-                if not query_embedding or len(query_embedding) == 0:
-                    raise ValueError("Embedding generation returned empty result")
-                
-            except HTTPException:
-                raise
-            except ValueError as ve:
-                error_msg = str(ve)
-                logger.error(f"Embedding validation error: {error_msg}")
-                
-                # Provide specific error message based on validation error
-                if "OPENAI_API_KEY" in error_msg or "API key" in error_msg or "empty" in error_msg.lower():
-                    detail_msg = f"OpenAI API key configuration error: {error_msg}. Please check your OPENAI_API_KEY in .env file."
-                else:
-                    detail_msg = f"Embedding validation failed: {error_msg}"
-                
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=detail_msg
-                )
-            except Exception as embed_err:
-                import traceback
-                error_str = str(embed_err)
-                error_traceback = traceback.format_exc()
-                
-                logger.exception(f"Failed to generate embeddings: {type(embed_err).__name__}: {error_str}")
-                if settings.is_development:
-                    logger.error(f"Full traceback:\n{error_traceback}")
-                
-                # Check for specific error types to provide helpful messages
-                api_key_issue = False
-                network_issue = False
-                rate_limit_issue = False
-                
-                if "401" in error_str or "invalid" in error_str.lower() or "api key" in error_str.lower() or "authentication" in error_str.lower():
-                    api_key_issue = True
-                    logger.error("CRITICAL: OpenAI API key appears to be invalid or expired")
-                elif "connection" in error_str.lower() or "timeout" in error_str.lower() or "network" in error_str.lower() or "connect" in error_str.lower():
-                    network_issue = True
-                    logger.error("CRITICAL: Network issue connecting to OpenAI API")
-                elif "rate limit" in error_str.lower() or "429" in error_str or "quota" in error_str.lower():
-                    rate_limit_issue = True
-                    logger.error("CRITICAL: OpenAI API rate limit or quota exceeded")
-                
-                # Provide specific error message based on issue type
-                if api_key_issue:
-                    detail_msg = "OpenAI API key is invalid or expired. Please check your OPENAI_API_KEY in .env file and ensure it's valid."
-                elif network_issue:
-                    detail_msg = "Unable to connect to OpenAI API. Please check your network connection and try again."
-                elif rate_limit_issue:
-                    detail_msg = "OpenAI API rate limit exceeded. Please wait a few minutes and try again."
-                else:
-                    if settings.is_development:
-                        detail_msg = f"Embeddings service error: {error_str[:200]}"
-                    else:
-                        detail_msg = "Embeddings service temporarily unavailable. Please try again later."
-                
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=detail_msg
-                )
-            
-            # Search for relevant documents - increased k for more comprehensive results
-            docs_with_scores = vs.similarity_search_by_vector_with_relevance_scores(
-                query_embedding, k=max(request.top_k or 10, 20)
+            gating_result = apply_gating_logic(
+                docs_with_scores,
+                retrieval_best,
+                effective_min_relevance_threshold,
+                effective_high_confidence_score,
             )
-            
-            if settings.is_development:
-                logger.info("Found %d relevant documents", len(docs_with_scores))
-            
-            # Implement dynamic threshold with fallback logic
-            # CRITICAL FIX: Lowered thresholds to prevent false negatives
-            # text-embedding-3-small can produce lower similarity scores for valid matches
-            # especially with domain-specific or technical content
-            HIGH_CONFIDENCE_THRESHOLD = 0.5
-            LOW_CONFIDENCE_THRESHOLD = 0.4
-            MINIMUM_THRESHOLD = 0.2  # Lowered from 0.3 to catch more relevant matches
-            ABSOLUTE_MINIMUM = 0.15  # Absolute minimum - use best document even if below MINIMUM
-            
-            # Log similarity scores for debugging
-            if settings.is_development and docs_with_scores:
-                scores = [score for _, score in docs_with_scores]
-                logger.info(
-                    f"Retrieved {len(docs_with_scores)} documents. "
-                    f"Score range: min={min(scores):.3f}, max={max(scores):.3f}, "
-                    f"avg={sum(scores)/len(scores):.3f}"
-                )
-            
-            relevant_docs = []
-            low_confidence_docs = []
-            
-            for doc, score in docs_with_scores:
-                if score >= HIGH_CONFIDENCE_THRESHOLD:
-                    relevant_docs.append((doc, score))
-                elif score >= LOW_CONFIDENCE_THRESHOLD:
-                    low_confidence_docs.append((doc, score))
-            
-            # Use low confidence docs if no high confidence ones
-            if not relevant_docs and low_confidence_docs:
-                relevant_docs = low_confidence_docs[:3]
-                if settings.is_development:
-                    logger.info(f"Using {len(relevant_docs)} low-confidence documents (scores >= {LOW_CONFIDENCE_THRESHOLD})")
-            
-            # FIXED: More lenient fallback - use best document even if below MINIMUM_THRESHOLD
-            # Previous bug: Required best_score >= MINIMUM_THRESHOLD, causing false negatives
-            # New logic: Use best document if it exists and score >= ABSOLUTE_MINIMUM
-            # This prevents total rejection when all scores are in 0.15-0.3 range
-            if not relevant_docs and docs_with_scores:
-                best_score = max(score for _, score in docs_with_scores)
-                if best_score >= ABSOLUTE_MINIMUM:
-                    # Use the best document(s) even if below MINIMUM_THRESHOLD
-                    # This prevents false negatives when all scores are in 0.15-0.3 range
-                    best_docs = [(doc, score) for doc, score in docs_with_scores if score == best_score]
-                    relevant_docs = best_docs[:3]  # Take up to 3 documents with best score
-                    if settings.is_development:
-                        logger.info(
-                            f"Using {len(relevant_docs)} document(s) with best score {best_score:.3f} "
-                            f"(below MINIMUM_THRESHOLD {MINIMUM_THRESHOLD} but >= ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
-                        )
-                else:
-                    if settings.is_development:
-                        logger.warning(
-                            f"No documents meet absolute minimum threshold. Best score: {best_score:.3f} "
-                            f"(below ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
-                        )
-            
-            # Enhanced PDF expansion for complete topic coverage
-            if relevant_docs:
-                top_doc, top_score = relevant_docs[0]
-                top_metadata = getattr(top_doc, "metadata", {}) or {}
-                top_source_type = top_metadata.get("source_type")
-                
-                if top_source_type == "pdf":
-                    # Enhanced PDF expansion - include more chunks from same PDF and related pages
-                    pdf_id = top_metadata.get("pdf_id")
-                    if pdf_id:
-                        additional_chunks = []
-                        for doc, score in docs_with_scores:
-                            md = getattr(doc, "metadata", {}) or {}
-                            if (md.get("source_type") == "pdf" and 
-                                md.get("pdf_id") == pdf_id and 
-                                score >= (ABSOLUTE_MINIMUM)):  # Use absolute minimum for expansion
-                                additional_chunks.append((doc, score))
-                        
-                        if additional_chunks:
-                            # Sort by page and chunk order for logical flow
-                            additional_chunks.sort(key=lambda x: (
-                                _safe_int(getattr(x[0], "metadata", {}).get("page_number"), 0),
-                                _safe_int(getattr(x[0], "metadata", {}).get("chunk_id"), 0)
-                            ))
-                            relevant_docs.extend(additional_chunks[:8])
-                
-                # Video expansion logic removed - PDF-only mode
-                # Cross-source expansion removed - PDF-only mode
+            relevant_docs = gating_result["relevant_docs"]
 
-            # Log filtering results before decision
-            if settings.is_development:
-                logger.info(
-                    f"After threshold filtering: {len(relevant_docs)} relevant docs, "
-                    f"{len(docs_with_scores)} total retrieved"
-                )
-                if relevant_docs:
-                    best_score_after_filter = max(score for _, score in relevant_docs)
-                    logger.info(f"Best score after filtering: {best_score_after_filter:.3f}")
-                elif docs_with_scores:
-                    best_score_all = max(score for _, score in docs_with_scores)
-                    logger.warning(
-                        f"All documents filtered out! Best score was {best_score_all:.3f} "
-                        f"(below ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
-                    )
-
-            # FIXED: Early exit only when truly no documents retrieved OR all scores below absolute minimum
-            # Previous bug: Exited early even when documents existed but were filtered by strict thresholds
-            # New logic: Only exit if vector search returned zero documents OR best score < ABSOLUTE_MINIMUM
-            if not relevant_docs:
-                # Only fallback if truly no documents retrieved OR all scores too low
-                if settings.is_development:
-                    if docs_with_scores:
-                        best_score = max(score for _, score in docs_with_scores)
-                        logger.warning(
-                            f"Fallback triggered: {len(docs_with_scores)} documents retrieved but all filtered. "
-                            f"Best score: {best_score:.3f} (below ABSOLUTE_MINIMUM {ABSOLUTE_MINIMUM})"
-                        )
-                    else:
-                        logger.warning("Fallback triggered: No documents retrieved from vector store")
-                answer = "Sorry, I don't have this information in the available study materials."
-                sources = []
+            if gating_result["should_refuse"]:
+                answer = gating_result["answer"]
+                sources = gating_result["sources"]
             else:
-                best_score = max(score for _, score in relevant_docs)
-                is_low_confidence = best_score < HIGH_CONFIDENCE_THRESHOLD
-                
-                # Get or create conversation chain for this session (if not already created)
-                if conversation_chain is None:
-                    conversation_chain = _get_or_create_conversation_chain(session_id, vs)
-                
-                # Using conversation chain with session memory
-                
-                # Check if user is asking for clarification/rephrasing
-                clarification_keywords = [
-                    'explain clearly', 'explain in simple terms', 'can you explain', 
-                    'clarify', 'simplify', 'break down', 'elaborate', 'rephrase',
-                    'what does this mean', 'help me understand', 'give more details',
-                    'explain more', 'tell me more', 'expand on', 'go into detail',
-                    'in more detail', 'more information', 'further explanation',
-                    # Added explicit phrases
-                    'can you explain more', 'show some examples', 'show more codes', 'explain in detail'
-                ]
-                is_clarification_request = any(
-                    keyword in request.query.lower() for keyword in clarification_keywords
+                generation_result = generate_answer(
+                    request,
+                    relevant_docs,
+                    retrieval_best,
+                    effective_high_confidence_score,
+                    conversation_chain,
+                    session_id,
+                    vs,
+                    is_follow_up,
                 )
-                
-                # Use conversation chain for context-aware responses
-                try:
-                    # Prepare context from relevant documents for better responses
-                    context = _merge_and_clean_content(relevant_docs)
-                    
-                    # Create a comprehensive query that includes context and maintains conversation flow
-                    if is_follow_up:
-                        # Try to include last topic explicitly to ground the continuation
-                        last_topic_text = None
-                        try:
-                            mem = conversation_chain.memory
-                            hist = mem.chat_memory.messages
-                            for i in range(len(hist) - 1, -1, -1):
-                                msg = hist[i]
-                                if hasattr(msg, '__class__') and 'Human' in str(msg.__class__) and hasattr(msg, 'content'):
-                                    last_topic_text = msg.content
-                                    break
-                        except Exception:
-                            last_topic_text = None
-
-                        topic_hint = f"\n🧭 **Last Topic Context:** {last_topic_text}\n" if last_topic_text else "\n"
-                        enhanced_query = f"""📚 **COURSE MATERIALS CONTEXT:**
-{context}{topic_hint}
-❓ **STUDENT FOLLOW-UP QUESTION:** {request.query}
-
-🎯 **INSTRUCTIONS:**
-This is a follow-up question. Stay on the SAME TOPIC as in the last topic context. Use the course materials above first. If the materials only partially cover the request, supplement with clear, accurate expansions and multiple code examples that align with the provided materials. Do NOT contradict or override the materials. Always structure the response into Explanation, Example, and Key Points."""
-                    else:
-                        enhanced_query = f"""📚 **COURSE MATERIALS CONTEXT:**
-{context}
-
-❓ **STUDENT QUESTION:** {request.query}
-
-🎯 **INSTRUCTIONS:**
-Please provide a comprehensive, educational response using the course materials above. If the materials are partial, expand with accurate, topic-appropriate detail without contradicting them. Always structure the response into Explanation, Example, and Key Points."""
-
-                    # Decide path based on retrieval strength and context richness
-                    # CRITICAL FIX: Check relevant_docs existence FIRST, not context length
-                    # Empty context can occur due to content filtering/cleaning, not lack of documents.
-                    # In PDF-based RAG, document presence must be prioritized over cleaned context.
-                    # The LLM can work with documents directly even if context merging produces empty string.
-                    context_length = len(context or "")
-                    
-                    # FIXED LOGIC: Only fallback if NO documents retrieved
-                    # Previous bug: checked context_length == 0 even when documents existed
-                    # This caused false negatives when content cleaning removed all text
-                    if not relevant_docs:
-                        # Truly no documents retrieved - legitimate fallback
-                        answer = "Sorry, I don't have this information in the available study materials."
-                    elif best_score < MINIMUM_THRESHOLD and context_length == 0:
-                        # Edge case: documents exist but score too low AND no usable content
-                        # This is rare but valid - documents are too irrelevant to use
-                        answer = "Sorry, I don't have this information in the available study materials."
-                    elif context_length < 300 or is_low_confidence:
-                        # Related but partial: expand with LLM and format
-                        # Documents exist and are relevant enough - use LLM
-                        if is_clarification_request or is_follow_up:
-                            raw_answer = _generate_clarification_response(request.query, relevant_docs)
-                        else:
-                            raw_answer = _generate_clarification_response(request.query, relevant_docs)
-                        answer = _format_educational_response(raw_answer, request.query)
-                    else:
-                        # Sufficient context: use conversation chain with memory
-                        result = conversation_chain.invoke({"question": enhanced_query})
-                        raw_answer = result.get("answer", "I couldn't generate a response.")
-                        answer = _format_educational_response(raw_answer, request.query)
-                        
-                except Exception as e:
-                    logger.error(f"Error using conversation chain: {e}")
-                    
-                    # FIXED: Try clarification response as fallback, but check documents first
-                    # Previous bug: checked context emptiness instead of document existence
-                    # Empty context does NOT mean no documents - it means content filtering removed text
-                    try:
-                        raw_answer = _generate_clarification_response(request.query, relevant_docs)
-                        context = _merge_and_clean_content(relevant_docs)
-                        
-                        # FIXED LOGIC: Only fallback if no documents OR (low score AND no context)
-                        # Don't fallback just because context is empty - documents might still be usable
-                        if not relevant_docs:
-                            answer = "Sorry, I don't have this information in the available study materials."
-                        elif best_score < MINIMUM_THRESHOLD and not context:
-                            # Edge case: score too low and no context, but documents exist
-                            answer = "Sorry, I don't have this information in the available study materials."
-                        else:
-                            # Documents exist and are usable - format the response
-                            answer = _format_educational_response(raw_answer, request.query)
-                    except Exception as fallback_error:
-                        logger.error(f"Error in fallback clarification response: {fallback_error}")
-                        # Last resort: check if we have documents at all
-                        if relevant_docs:
-                            answer = "I found relevant documents but encountered an error processing them. Please try rephrasing your question."
-                        else:
-                            answer = "Sorry, I don't have this information in the available study materials."
-                
-                # Process sources
-                sources = []
-                if request.include_sources:
-                    for doc, score in relevant_docs:
-                        md = getattr(doc, "metadata", None) or {}
-                        src_type = md.get("source_type", "pdf")
-                        
-                        # PDF-only mode - only process PDF sources
-                        if src_type != "pdf":
-                            continue
-                        
-                        source_name = md.get("pdf_title", "Unknown PDF")
-
-                        # PDF-only mode - simplified source metadata
-                        sources.append({
-                            "source_type": "pdf",
-                            "pdf_title": source_name,
-                            "pdf_id": md.get("pdf_id"),
-                            "page_number": md.get("page_number"),
-                            "chunk_id": md.get("chunk_id"),
-                            "relevance_score": score,
-                            "source_name": source_name
-                        })
+                answer = generation_result["answer"]
+                sources = build_sources(
+                    request,
+                    relevant_docs,
+                    effective_min_relevance_threshold,
+                    answer,
+                )
             
         except HTTPException:
             # Re-raise HTTPExceptions (like embedding errors) so they're properly handled
@@ -1406,68 +1362,19 @@ Please provide a comprehensive, educational response using the course materials 
         
         processing_time = time.time() - start_time
         
-        # Store chat interaction in database
-        try:
-            # Generate session_id if not provided
-            session_id = request.conversation_id or str(uuid.uuid4())
-            
-            # PDF-only mode - video_id not used
-            video_id = None
-            
-            # Store the chat interaction
-            chat_id = store_chat_interaction(
-                user_id=request.user_id or "anonymous",
-                session_id=session_id,
-                user_message=request.query,
-                bot_response=answer,
-                video_id=None  # PDF-only mode
-            )
-            
-            if chat_id:
-                if settings.is_development:
-                    logger.info(f"Chat interaction stored with ID: {chat_id}")
-            else:
-                logger.warning("Failed to store chat interaction")
-            
-            # Store user query in user_queries table
-            try:
-                from app.services.embedding_manager import get_embeddings_instance
-                from app.database.supabase import get_supabase
-                
-                # Generate embedding for the user query
-                embeddings = get_embeddings_instance()
-                query_embedding = embeddings.embed_query(request.query)
-                
-                # Store in user_queries table
-                supabase = get_supabase()
-                query_record = {
-                    "user_id": request.user_id or "anonymous",
-                    "query_text": request.query,
-                    "query_embedding": query_embedding,
-                    "matched_chunk_id": sources[0].get("chunk_id") if sources else None
-                }
-                
-                result = supabase.table("user_queries").insert(query_record).execute()
-                if result.data:
-                    if settings.is_development:
-                        logger.info(f"User query stored with ID: {result.data[0]['id']}")
-                else:
-                    logger.warning("Failed to store user query")
-                    
-            except Exception as e:
-                logger.error(f"Error storing user query: {e}")
-                # Don't fail the request if user query storage fails
-                
-        except Exception as e:
-            logger.error(f"Error storing chat interaction: {e}")
-            # Don't fail the request if chat history storage fails
-        
-        return ChatResponse(
+        await dispatch_tracking(
+            request=request,
+            session_id=session_id,
+            answer=answer,
+            query_embedding=query_embedding,
+            sources=sources,
+        )
+
+        return _build_chat_response(
             answer=answer,
             sources=sources,
-            conversation_id=session_id,
+            session_id=session_id,
             processing_time=round(processing_time, 3),
-            tokens_used=None  # Would be populated by LLM response
         )
             
     except HTTPException:
@@ -1556,27 +1463,6 @@ async def get_user_chat_sessions(user_id: str):
         )
 
 
-@router.get("/session/{user_id}/{session_id}")
-async def get_user_chat_session_info(user_id: str, session_id: str):
-    """
-    Information endpoint for chat session deletion.
-    Returns usage instructions when accessed via GET.
-    
-    Returns:
-        JSON with usage information
-    """
-    return {
-        "message": "Chat session deletion endpoint",
-        "description": "To delete a chat session, use DELETE /chat/session/{user_id}/{session_id}",
-        "method": "DELETE",
-        "endpoint": f"/chat/session/{user_id}/{session_id}",
-        "parameters": {
-            "user_id": user_id,
-            "session_id": session_id
-        },
-        "note": "This endpoint uses DELETE method. Use GET only to view this information."
-    }
-
 @router.delete("/session/{user_id}/{session_id}")
 async def delete_user_chat_session(user_id: str, session_id: str):
     """
@@ -1605,26 +1491,6 @@ async def delete_user_chat_session(user_id: str, session_id: str):
             detail="Error deleting chat session"
         )
 
-
-@router.get("/clear-memory/{session_id}")
-async def clear_conversation_memory_info(session_id: str):
-    """
-    Information endpoint for clearing conversation memory.
-    Returns usage instructions when accessed via GET.
-    
-    Returns:
-        JSON with usage information
-    """
-    return {
-        "message": "Clear conversation memory endpoint",
-        "description": "To clear conversation memory, use POST /chat/clear-memory/{session_id}",
-        "method": "POST",
-        "endpoint": f"/chat/clear-memory/{session_id}",
-        "parameters": {
-            "session_id": session_id
-        },
-        "note": "This endpoint uses POST method. Use GET only to view this information."
-    }
 
 @router.post("/clear-memory/{session_id}")
 async def clear_conversation_memory(session_id: str):

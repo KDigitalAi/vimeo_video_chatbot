@@ -5,6 +5,7 @@ All imports are wrapped in try/except to prevent failures during cold starts.
 import os
 import time
 from datetime import datetime
+from app.utils.runtime_helpers import get_logger_safe, get_settings_safe
 
 # Core FastAPI imports - must be at top level for Vercel
 # DO NOT raise exceptions here - let api/index.py handle them
@@ -32,23 +33,12 @@ except ImportError as e:
     JSONResponse = None
     RequestValidationError = None
 
-# Safe settings import with fallback
-try:
-    from app.config.settings import settings
-except Exception as e:
-    import logging
-    logging.basicConfig(level=logging.WARNING)
-    logger = logging.getLogger(__name__)
-    logger.error(f"Failed to load settings: {e}")
-    raise ImportError("Settings module is required - cannot start application without proper configuration")
+settings = get_settings_safe()
+logger = get_logger_safe(__name__)
 
-# Safe logger import
 try:
-    from app.utils.logger import logger, cleanup_memory
+    from app.utils.logger import cleanup_memory
 except Exception:
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
     def cleanup_memory():
         pass
 
@@ -171,26 +161,18 @@ if app is not None and FASTAPI_AVAILABLE:
             }
         )
 
-# Startup event - test database connection
+# Startup event - keep startup lightweight and avoid blocking on external DB checks
 if app is not None and FASTAPI_AVAILABLE:
     @app.on_event("startup")
     async def startup_event():
-        """Test database connection on startup."""
+        """Lightweight startup hook that does not block on database connectivity."""
         try:
-            from app.database.supabase import test_connection
-            logger.info("Testing Supabase database connection on startup...")
-            connection_result = test_connection()
-            
-            if connection_result.get("connected"):
-                logger.info("[OK] Database connection successful. All tables are accessible.")
-            else:
-                logger.warning("[WARNING] Database connection issues detected:")
-                for error in connection_result.get("errors", []):
-                    logger.warning(f"  - {error}")
-                logger.warning("Some features may not work correctly. Check your Supabase configuration.")
+            logger.info(
+                "Startup completed without blocking database checks. "
+                "Use /health/detailed or /health/database for on-demand Supabase validation."
+            )
         except Exception as e:
-            logger.error(f"Failed to test database connection on startup: {e}")
-            logger.warning("Application will continue, but database features may not work.")
+            logger.warning("Startup hook encountered a non-blocking issue: %s", e)
 
 # Health check - must work without dependencies
 if app is not None and FASTAPI_AVAILABLE:
@@ -329,21 +311,6 @@ if app is not None and FASTAPI_AVAILABLE:
             }
             overall_healthy = False
         
-        try:
-            from app.services.retriever_chain import get_conversational_chain
-            health_status["chat_service"]["retriever_chain"] = {
-                "status": "available" if get_conversational_chain else "unavailable",
-                "function": "loaded" if get_conversational_chain else "not_loaded"
-            }
-            if not get_conversational_chain:
-                overall_healthy = False
-        except Exception as e:
-            health_status["chat_service"]["retriever_chain"] = {
-                "status": "unavailable",
-                "error": str(e)
-            }
-            overall_healthy = False
-        
         # Check router status
         health_status["routers"] = _router_status
         
@@ -352,41 +319,13 @@ if app is not None and FASTAPI_AVAILABLE:
         
         return health_status
 
-    # Root endpoint
     @app.get("/")
     async def root():
-        """Root endpoint - API discovery that lists available endpoints."""
+        """Backend service root endpoint."""
         return {
             "message": "PDF Knowledge Chatbot API",
-            "version": "1.0.0",
-            "status": "running",
-            "environment": getattr(settings, 'ENVIRONMENT', 'production'),
-            "endpoints": {
-                "health": {
-                    "quick": "/health",
-                    "detailed": "/health/detailed"
-                },
-                "chat": {
-                    "query": "/chat/query",
-                    "history": "/chat/history/{user_id}",
-                    "sessions": "/chat/sessions/{user_id}",
-                    "session_delete": "/chat/session/{user_id}/{session_id}",
-                    "clear_memory": "/chat/clear-memory/{session_id}",
-                    "delete_history": "DELETE /chat/history/{user_id}"
-                },
-                "pdf": {
-                    "upload": "/pdf/upload",
-                    "pdf": "/pdf/pdf",  # Alias for upload
-                    "batch": "/pdf/upload/batch",
-                    "list": "/pdf/list",
-                    "status": "/pdf/{pdf_id}/status",
-                    "delete": "DELETE /pdf/{pdf_id}"
-                },
-                "debug": {
-                    "routers": "/debug/routers"
-                }
-            },
-            "timestamp": datetime.utcnow().isoformat()
+            "service": "backend-only",
+            "docs": "/docs" if not is_production else None,
         }
 
 # Load routers with error handling - each router loads independently
@@ -476,202 +415,6 @@ if app is not None and FASTAPI_AVAILABLE:
     if not _router_status.get('chat', False):
         logger.error("WARNING: Chat router failed to load. /chat/query will not work.")
 
-    # Add diagnostic endpoint to help debug service imports
-    @app.get("/debug/services")
-    async def debug_services():
-        """Diagnostic endpoint to check service import status and errors."""
-        import os
-        import sys
-        import traceback
-        
-        diagnostics = {
-            "environment_variables": {},
-            "service_imports": {},
-            "import_errors": {},
-            "recommendations": []
-        }
-        
-        # Check environment variables
-        required_vars = ["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"]
-        for var in required_vars:
-            value = os.getenv(var)
-            diagnostics["environment_variables"][var] = {
-                "set": value is not None and value != "",
-                "length": len(value) if value else 0,
-                "preview": value[:10] + "..." if value and len(value) > 10 else value if value else None
-            }
-            if not value or value == "":
-                diagnostics["recommendations"].append(f"Set {var} in Vercel environment variables")
-        
-        # Try importing services with detailed error capture
-        services_to_test = {
-            "vector_store": "app.services.vector_store",
-            "retriever_chain": "app.services.retriever_chain",
-            "embedding_manager": "app.services.embedding_manager",
-            "supabase_client": "app.database.supabase",
-            "models": "app.models",
-            "models_schemas": "app.models.schemas"
-        }
-        
-        for service_name, module_path in services_to_test.items():
-            try:
-                module = __import__(module_path, fromlist=[''])
-                diagnostics["service_imports"][service_name] = {
-                    "status": "success",
-                    "module": module_path
-                }
-                
-                # Try to get specific functions
-                if service_name == "vector_store":
-                    if hasattr(module, 'load_supabase_vectorstore'):
-                        func = getattr(module, 'load_supabase_vectorstore')
-                        diagnostics["service_imports"][service_name]["function"] = "available"
-                        # Try to actually call it
-                        try:
-                            vs = func()
-                            diagnostics["service_imports"][service_name]["initialization"] = "success"
-                        except Exception as e:
-                            diagnostics["service_imports"][service_name]["initialization"] = "failed"
-                            diagnostics["service_imports"][service_name]["initialization_error"] = str(e)
-                            diagnostics["import_errors"][service_name] = str(e)
-                    else:
-                        diagnostics["service_imports"][service_name]["function"] = "missing"
-                        
-                elif service_name == "retriever_chain":
-                    if hasattr(module, 'get_conversational_chain'):
-                        diagnostics["service_imports"][service_name]["function"] = "available"
-                    else:
-                        diagnostics["service_imports"][service_name]["function"] = "missing"
-                        
-                elif service_name == "models":
-                    # Check if it's a package
-                    if hasattr(module, '__path__'):
-                        diagnostics["service_imports"][service_name]["is_package"] = True
-                        # Try to check if schemas exists
-                        try:
-                            import app.models.schemas
-                            diagnostics["service_imports"][service_name]["schemas_available"] = True
-                        except Exception as schemas_error:
-                            diagnostics["service_imports"][service_name]["schemas_available"] = False
-                            diagnostics["service_imports"][service_name]["schemas_error"] = str(schemas_error)
-                    else:
-                        diagnostics["service_imports"][service_name]["is_package"] = False
-                        
-                elif service_name == "models_schemas":
-                    if hasattr(module, 'ChatRequest'):
-                        diagnostics["service_imports"][service_name]["ChatRequest"] = "available"
-                    else:
-                        diagnostics["service_imports"][service_name]["ChatRequest"] = "missing"
-                    if hasattr(module, 'ChatResponse'):
-                        diagnostics["service_imports"][service_name]["ChatResponse"] = "available"
-                    else:
-                        diagnostics["service_imports"][service_name]["ChatResponse"] = "missing"
-                        
-            except ImportError as e:
-                diagnostics["service_imports"][service_name] = {
-                    "status": "import_error",
-                    "error": str(e)
-                }
-                diagnostics["import_errors"][service_name] = str(e)
-                diagnostics["recommendations"].append(f"Fix import error for {service_name}: {str(e)}")
-            except Exception as e:
-                diagnostics["service_imports"][service_name] = {
-                    "status": "error",
-                    "error": str(e),
-                    "traceback": traceback.format_exc()
-                }
-                diagnostics["import_errors"][service_name] = str(e)
-                diagnostics["recommendations"].append(f"Fix error for {service_name}: {str(e)}")
-        
-        # Check if Supabase can be initialized and test all tables
-        try:
-            from app.database.supabase import get_supabase, test_connection
-            supabase = get_supabase()
-            connection_result = test_connection()
-            
-            diagnostics["supabase_connection"] = {
-                "status": "success" if connection_result.get("connected") else "partial",
-                "client_type": str(type(supabase)),
-                "tables": connection_result.get("tables", {}),
-                "errors": connection_result.get("errors", [])
-            }
-            
-            if not connection_result.get("connected"):
-                for error in connection_result.get("errors", []):
-                    diagnostics["recommendations"].append(f"Fix Supabase: {error}")
-        except Exception as e:
-            diagnostics["supabase_connection"] = {
-                "status": "failed",
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
-            diagnostics["recommendations"].append(f"Fix Supabase connection: {str(e)}")
-        
-        return diagnostics
-
-    # Add diagnostic endpoint to help debug router loading
-    @app.get("/debug/routers")
-    async def debug_routers():
-        """Debug endpoint to check router loading status - works in production."""
-        try:
-            # Get all registered routes
-            routes_info = []
-            for route in app.routes:
-                route_info = {
-                    "path": route.path,
-                    "name": getattr(route, 'name', 'unknown')
-                }
-                # Get methods if available
-                if hasattr(route, 'methods'):
-                    route_info["methods"] = list(route.methods)
-                routes_info.append(route_info)
-            
-            # Check environment variables (without exposing values)
-            import os
-            env_vars_status = {
-                "OPENAI_API_KEY": "set" if os.getenv("OPENAI_API_KEY") else "missing",
-                "SUPABASE_URL": "set" if os.getenv("SUPABASE_URL") else "missing",
-                "SUPABASE_SERVICE_KEY": "set" if os.getenv("SUPABASE_SERVICE_KEY") else "missing",
-                "ENVIRONMENT": os.getenv("ENVIRONMENT", "not_set"),
-                "VERCEL": os.getenv("VERCEL", "not_set"),
-                "VERCEL_ENV": os.getenv("VERCEL_ENV", "not_set")
-            }
-            
-            # Check for import errors
-            import sys
-            import_errors = []
-            for module_name in sys.modules:
-                if module_name.startswith('app.'):
-                    try:
-                        module = sys.modules[module_name]
-                        # Check if module has any obvious errors
-                        if hasattr(module, '__file__') and module.__file__:
-                            pass  # Module loaded successfully
-                    except Exception as e:
-                        import_errors.append(f"{module_name}: {str(e)}")
-            
-            return {
-                "router_status": _router_status,
-                "settings_loaded": hasattr(settings, 'ENVIRONMENT'),
-                "environment": getattr(settings, 'ENVIRONMENT', 'unknown'),
-                "fastapi_available": FASTAPI_AVAILABLE,
-                "app_created": app is not None,
-                "available_routes": routes_info,
-                "total_routes": len(routes_info),
-                "environment_variables": env_vars_status,
-                "python_version": sys.version,
-                "import_errors": import_errors[:10]  # Limit to first 10 errors
-            }
-        except Exception as e:
-            import traceback
-            return {
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": traceback.format_exc(),
-                "router_status": _router_status,
-                "environment": getattr(settings, 'ENVIRONMENT', 'unknown') if 'settings' in globals() else 'unknown'
-            }
-    
     # Database connection test endpoint
     @app.get("/health/database")
     async def database_health_check():
@@ -721,7 +464,7 @@ if app is not None and FASTAPI_AVAILABLE:
             return {
                 "status": "ok",
                 "message": "Logs endpoint active",
-                "note": "In Vercel, check deployment logs in dashboard or use /debug/routers for diagnostics",
+                "note": "In Vercel, check deployment logs in dashboard for diagnostics",
                 "log_level": logging.getLevelName(logger.level) if hasattr(logger, 'level') else "unknown",
                 "handlers": [type(h).__name__ for h in logger_handlers],
                 "recent_logs": log_records[-20:] if log_records else ["No in-memory logs available. Check Vercel deployment logs."]

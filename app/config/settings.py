@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     
     # AI Model Configuration
     EMBEDDING_MODEL: str = Field(default="text-embedding-3-small", description="OpenAI embedding model")
+    # Must match pdf_embeddings column (vector(1536)) and Assessment ingestion
+    EMBEDDING_DIMENSIONS: int = Field(default=1536, description="Embedding output dimensions (text-embedding-3-* uses 1536)")
     LLM_MODEL: str = Field(default="gpt-3.5-turbo", description="OpenAI LLM model")
     
     # Security Configuration

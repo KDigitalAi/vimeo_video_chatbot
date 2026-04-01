@@ -7,13 +7,15 @@ import uuid
 import gc
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Request
+from app.utils.runtime_helpers import get_logger_safe, get_settings_safe, memory_guard
+
+logger = get_logger_safe(__name__)
 
 # Safe imports with error handling for serverless environments
 try:
     from app.services.pdf_processor import process_pdf_file, validate_pdf_file, get_pdf_metadata
 except ImportError as e:
-    import logging
-    logging.error(f"Failed to import pdf_processor functions: {e}")
+    logger.error(f"Failed to import pdf_processor functions: {e}")
     process_pdf_file = None
     validate_pdf_file = None
     get_pdf_metadata = None
@@ -21,40 +23,29 @@ except ImportError as e:
 try:
     from app.services.pdf_store import store_pdf_embeddings, check_duplicate_pdf, delete_pdf_embeddings
 except ImportError as e:
-    import logging
-    logging.error(f"Failed to import pdf_store functions: {e}")
+    logger.error(f"Failed to import pdf_store functions: {e}")
     store_pdf_embeddings = None
     check_duplicate_pdf = None
     delete_pdf_embeddings = None
 
 try:
-    from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
+    from app.utils.logger import log_memory_usage, cleanup_memory
 except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
     def log_memory_usage(*args, **kwargs): pass
     def cleanup_memory(*args, **kwargs): pass
-    def check_memory_threshold(*args, **kwargs): return True
 
 try:
     from app.models.schemas import PDFIngestResponse
 except ImportError as e:
-    import logging
-    logging.error(f"Failed to import PDFIngestResponse: {e}")
+    logger.error(f"Failed to import PDFIngestResponse: {e}")
     PDFIngestResponse = None
 
-try:
-    from app.config.settings import settings
-except ImportError:
-    import logging
-    logging.error("Failed to import settings - this should not happen in production")
-    raise
+settings = get_settings_safe()
 
 try:
     from app.services.pdf_ingestion import run_pdf_ingestion_from_content, generate_pdf_id_from_content
 except ImportError as e:
-    import logging
-    logging.error(f"Failed to import pdf_ingestion service: {e}")
+    logger.error(f"Failed to import pdf_ingestion service: {e}")
     run_pdf_ingestion_from_content = None
     generate_pdf_id_from_content = None
 
@@ -62,35 +53,6 @@ _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 _BATCH_CLEANUP_INTERVAL = 3
 
 router = APIRouter()
-
-@router.get("/upload")
-@router.get("/pdf")  # Alias for /upload to match documentation
-async def ingest_pdf_info(request: Request):
-    """
-    Information endpoint for PDF upload.
-    Returns usage instructions when accessed via GET.
-    
-    Returns:
-        JSON with usage information and example
-    """
-    base_url = str(request.base_url).rstrip('/')
-    return {
-        "message": "PDF upload endpoint",
-        "description": "To upload a PDF, use POST /pdf/upload with multipart/form-data",
-        "method": "POST",
-        "endpoint": "/pdf/upload",
-        "content_type": "multipart/form-data",
-        "example": {
-            "curl": f"curl -X POST {base_url}/pdf/upload -F 'file=@document.pdf' -F 'force_reprocess=false'"
-        },
-        "required_fields": {
-            "file": "PDF file to upload (multipart/form-data, required)"
-        },
-        "optional_fields": {
-            "force_reprocess": "Whether to reprocess if PDF already exists (boolean, default: false)"
-        },
-        "note": "This endpoint uses POST method. Use GET only to view this information."
-    }
 
 @router.post("/upload", response_model=PDFIngestResponse)
 @router.post("/pdf", response_model=PDFIngestResponse)  # Alias for /upload to match documentation
@@ -109,119 +71,15 @@ async def ingest_pdf(
         PDFIngestResponse with processing results
         
     Raises:
-        HTTPException: For various error conditions
+        HTTPException: 501 - PDF upload is handled by the Assessment system.
     """
-    # Check if required services are available
-    if PDFIngestResponse is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PDF ingestion service is not properly configured. Please check server logs."
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "PDF upload and ingestion are handled by the Assessment system. "
+            "Use that pipeline to add documents; the chatbot reads embeddings from Assessment pdf_embeddings."
         )
-    
-    if run_pdf_ingestion_from_content is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PDF ingestion pipeline service is not available. Please check server configuration."
-        )
-    
-    try:
-        # Validate file
-        if not file.filename or not file.filename.lower().endswith('.pdf'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only PDF files are supported"
-            )
-        
-        # Read file content
-        content = await file.read()
-        
-        # Check file size
-        if len(content) > _MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="PDF file too large. Maximum size is 50MB"
-            )
-        
-        # Generate PDF ID from content
-        pdf_id = generate_pdf_id_from_content(content) if generate_pdf_id_from_content else str(uuid.uuid4())
-        
-        # Use shared PDF ingestion service
-        result = run_pdf_ingestion_from_content(
-            pdf_content=content,
-            pdf_id=pdf_id,
-            pdf_title=file.filename,
-            force_reprocess=force_reprocess
-        )
-        
-        # Clean up content immediately
-        del content
-        gc.collect()
-        
-        # Convert result to HTTP response
-        if not result.success:
-            if result.status == "error":
-                if "not found" in result.error.lower():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=result.error
-                    )
-                elif "invalid" in result.error.lower() or "corrupted" in result.error.lower():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=result.error
-                    )
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=result.error or "Failed to process PDF"
-                    )
-        
-        return PDFIngestResponse(
-            pdf_id=result.pdf_id,
-            filename=result.filename,
-            chunks_processed=result.chunks_processed,
-            embeddings_stored=result.embeddings_stored,
-            processing_time=result.processing_time,
-            status=result.status
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"PDF ingestion failed: {e}")
-        cleanup_memory()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process PDF: {str(e)}"
-        )
-
-@router.get("/upload/batch")
-async def ingest_pdf_batch_info(request: Request):
-    """
-    Information endpoint for batch PDF upload.
-    Returns usage instructions when accessed via GET.
-    
-    Returns:
-        JSON with usage information and example
-    """
-    base_url = str(request.base_url).rstrip('/')
-    return {
-        "message": "Batch PDF upload endpoint",
-        "description": "To upload multiple PDFs, use POST /pdf/upload/batch with multipart/form-data",
-        "method": "POST",
-        "endpoint": "/pdf/upload/batch",
-        "content_type": "multipart/form-data",
-        "example": {
-            "curl": f"curl -X POST {base_url}/pdf/upload/batch -F 'files=@doc1.pdf' -F 'files=@doc2.pdf' -F 'force_reprocess=false'"
-        },
-        "required_fields": {
-            "files": "List of PDF files to upload (multipart/form-data, required)"
-        },
-        "optional_fields": {
-            "force_reprocess": "Whether to reprocess if PDFs already exist (boolean, default: false)"
-        },
-        "note": "This endpoint uses POST method. Use GET only to view this information."
-    }
+    )
 
 @router.post("/upload/batch")
 async def ingest_pdf_batch(
@@ -264,7 +122,7 @@ async def ingest_pdf_batch(
                 
                 # Optimized memory cleanup - O(1)
                 if (i + 1) % _BATCH_CLEANUP_INTERVAL == 0:
-                    cleanup_memory()
+                    memory_guard(logger, f"batch processing file {i + 1}")
                     log_memory_usage(f"batch processing file {i + 1}")
                 
             except Exception as e:
@@ -401,17 +259,17 @@ async def get_pdf_info(pdf_id: str):
 @router.delete("/{pdf_id}")
 async def delete_pdf(pdf_id: str):
     """
-    Delete a PDF and all its embeddings.
-    
-    Args:
-        pdf_id: Unique identifier for the PDF
-        
-    Returns:
-        Deletion result
+    Deletion is handled by the Assessment system; chatbot does not delete from pdf_embeddings.
     """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "PDF deletion is handled by the Assessment system. "
+            "The chatbot only reads from Assessment pdf_embeddings."
+        )
+    )
     try:
         deleted_count = delete_pdf_embeddings(pdf_id)
-        
         return {
             "pdf_id": pdf_id,
             "embeddings_deleted": deleted_count,
