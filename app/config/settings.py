@@ -3,13 +3,13 @@ Configuration management with environment validation.
 Serverless-safe: no file system writes at import time.
 """
 import os
-import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.utils.runtime_helpers import get_logger_safe
 
 # Get project root
 @lru_cache(maxsize=1)
@@ -20,29 +20,19 @@ def get_project_root():
 # Load environment variables
 project_root = get_project_root()
 env_path = project_root / ".env"
+logger = get_logger_safe(__name__)
 
 # Try loading .env file - wrap in try/except to prevent crashes
 try:
     load_dotenv(dotenv_path=env_path)
 except Exception as e:
-    # Use basic logging if dotenv fails
-    try:
-        logging.warning(f"Could not load .env file: {e}")
-    except Exception:
-        # If logging also fails, just pass silently
-        pass
-
-# Initialize logger safely
-try:
-    logger = logging.getLogger(__name__)
-except Exception:
-    # Fallback if logging fails
-    import sys
-    class DummyLogger:
-        def warning(self, *args, **kwargs): pass
-        def error(self, *args, **kwargs): pass
-        def info(self, *args, **kwargs): pass
-    logger = DummyLogger()
+    logger.warning(
+        "Could not load .env file",
+        component="settings",
+        operation="load_config",
+        result="failure",
+        env_path=str(env_path),
+    )
 
 class Settings(BaseSettings):
     """Application settings with validation."""
@@ -105,7 +95,7 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT == "development"
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(env_path),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"
@@ -114,21 +104,33 @@ class Settings(BaseSettings):
 # Global settings instance - serverless-safe initialization
 # Multiple fallback layers to prevent crashes
 try:
-    # First try: Normal initialization
-    env_value = os.getenv("ENVIRONMENT", "production")
-    # Ensure ENVIRONMENT is valid before creating Settings
-    if env_value not in {'development', 'staging', 'production'}:
-        logger.warning(f"Invalid ENVIRONMENT value '{env_value}', defaulting to 'production'")
-        env_value = "production"
-    
-    settings = Settings(ENVIRONMENT=env_value)
+    # First try: load settings from environment and the absolute project .env file.
+    settings = Settings()
     if settings.is_development:
-        logger.info(f"Configuration loaded for {settings.ENVIRONMENT} environment")
+        logger.info(
+            "Configuration loaded",
+            component="settings",
+            operation="load_config",
+            result="success",
+            environment=settings.ENVIRONMENT,
+        )
 except ValueError as ve:
     # Handle validation errors (e.g., invalid ENVIRONMENT)
-    logger.error(f"Settings validation error: {ve}")
+    logger.error(
+        "Settings validation error",
+        component="settings",
+        operation="load_config",
+        result="failure",
+        error_type="ValueError",
+    )
     try:
         settings = Settings(ENVIRONMENT="production", DEBUG=False)
+        logger.warning(
+            "Falling back to production-safe settings after validation error",
+            component="settings",
+            operation="load_config",
+            result="fallback",
+        )
     except Exception:
         # Last resort: create minimal settings object
         class MinimalSettings:
@@ -143,12 +145,21 @@ except ValueError as ve:
             # VIMEO_ACCESS_TOKEN removed - PDF-only mode
         settings = MinimalSettings()
 except Exception as e:
-    logger.error(f"Failed to load configuration: {e}")
-    import traceback
-    logger.error(f"Traceback: {traceback.format_exc()}")
+    logger.exception(
+        "Failed to load configuration",
+        component="settings",
+        operation="load_config",
+        result="failure",
+    )
     # Create minimal settings for serverless to avoid import failures
     try:
         settings = Settings(ENVIRONMENT="production", DEBUG=False)
+        logger.warning(
+            "Falling back to production-safe settings after configuration failure",
+            component="settings",
+            operation="load_config",
+            result="fallback",
+        )
     except Exception:
         # Last resort: create minimal settings object
         class MinimalSettings:

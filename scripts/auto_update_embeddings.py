@@ -17,7 +17,7 @@ sys.path.append('.')
 
 from app.config.settings import settings
 from app.database.supabase import get_supabase
-from app.services.pdf_ingestion import run_pdf_ingestion_from_path, generate_pdf_id_from_content
+from app.services.pdf.pdf_ingestion import run_pdf_ingestion_from_path, generate_pdf_id_from_content
 
 # Configure logging
 logging.basicConfig(

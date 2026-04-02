@@ -4,7 +4,7 @@ Provides comprehensive validation for all API endpoints.
 """
 import re
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Safe import of security functions with fallbacks
 try:
@@ -23,14 +23,12 @@ except ImportError:
 
 class BaseRequestModel(BaseModel):
     """Base request model with common validation."""
-    
-    class Config:
-        # Enable validation assignment
-        validate_assignment = True
-        # Use enum values
-        use_enum_values = True
-        # Allow population by field name (Pydantic v2 compatible)
-        populate_by_name = True
+
+    model_config = ConfigDict(
+        validate_assignment=True,
+        use_enum_values=True,
+        populate_by_name=True,
+    )
 
 # VideoIngestRequest removed - PDF-only mode
 
@@ -42,7 +40,7 @@ class ChatRequest(BaseRequestModel):
         min_length=1,
         max_length=1000,
         description="User query/question",
-        example="What is machine learning?"
+        json_schema_extra={"example": "What is machine learning?"},
     )
     user_id: Optional[str] = Field(
         default=None,
@@ -77,8 +75,9 @@ class ChatRequest(BaseRequestModel):
         description="Include source documents in response"
     )
     
-    @validator('query')
-    def validate_query(cls, v):
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, v: str) -> str:
         """Validate and sanitize query text."""
         if not v or not v.strip():
             raise ValueError('Query cannot be empty')
@@ -91,14 +90,43 @@ class ChatRequest(BaseRequestModel):
             raise ValueError('Query cannot be empty after sanitization')
         
         return sanitized
-    
-    @validator('conversation_id')
-    def validate_conversation_id(cls, v):
+
+    @field_validator("conversation_id")
+    @classmethod
+    def validate_conversation_id(cls, v: Optional[str]) -> Optional[str]:
         """Validate conversation ID format."""
         if v is not None:
             if not re.match(r'^[a-zA-Z0-9\-_]+$', v):
                 raise ValueError('Conversation ID can only contain alphanumeric characters, hyphens, and underscores')
         return v
+
+    @field_validator("user_id")
+    @classmethod
+    def validate_user_id(cls, v: Optional[str]) -> Optional[str]:
+        """Validate and normalize user identifiers."""
+        if v is None:
+            return v
+        normalized = v.strip()
+        if not normalized:
+            raise ValueError('User ID cannot be empty')
+        return normalized
+
+
+class ChatQueryPayload(BaseRequestModel):
+    """Envelope model for chat query requests."""
+
+    request: ChatRequest
+
+
+class SessionEndRequest(BaseRequestModel):
+    """Request model for legacy session end operations."""
+
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Session identifier to end",
+    )
 
 class ChatResponse(BaseRequestModel):
     """Response model for chat endpoint."""
@@ -132,38 +160,38 @@ class PDFIngestResponse(BaseRequestModel):
     pdf_id: str = Field(
         ...,
         description="Unique identifier for the processed PDF",
-        example="550e8400-e29b-41d4-a716-446655440000"
+        json_schema_extra={"example": "550e8400-e29b-41d4-a716-446655440000"},
     )
     
     filename: str = Field(
         ...,
         description="Original filename of the uploaded PDF",
-        example="document.pdf"
+        json_schema_extra={"example": "document.pdf"},
     )
     
     chunks_processed: int = Field(
         ...,
         ge=0,
         description="Number of text chunks created from the PDF",
-        example=15
+        json_schema_extra={"example": 15},
     )
     
     embeddings_stored: int = Field(
         ...,
         ge=0,
         description="Number of embeddings stored in the database",
-        example=15
+        json_schema_extra={"example": 15},
     )
     
     processing_time: float = Field(
         ...,
         ge=0,
         description="Time taken to process the PDF in seconds",
-        example=2.5
+        json_schema_extra={"example": 2.5},
     )
     
     status: str = Field(
         ...,
         description="Processing status",
-        example="success"
+        json_schema_extra={"example": "success"},
     )

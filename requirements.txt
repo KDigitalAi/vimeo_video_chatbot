@@ -1,76 +1,31 @@
-# Core FastAPI and web framework
+# Production dependencies for the backend runtime only.
+
+# Core web stack
 fastapi==0.121.1
-uvicorn==0.38.0
-starlette==0.49.3
-python-multipart==0.0.6
 pydantic==2.8.2
 pydantic-settings==2.4.0
-pydantic_core==2.20.1
+python-multipart==0.0.22
+uvicorn==0.38.0
 
-# OpenAI and AI/ML
-openai==1.50.0
-
-# LangChain
+# AI / LLM stack
 langchain==0.3.1
 langchain-core==0.3.63
 langchain-openai==0.2.0
+openai==1.50.0
+tiktoken==0.8.0
 
-# Supabase (PostgREST only - direct database access)
+# Data access
 postgrest==0.16.11
 
-# PDF Processing
-PyPDF2==3.0.1
+# Document processing
 PyMuPDF==1.26.6
-
-# HTTP and networking
-# Note: httpx and httpcore are installed transitively by openai/langchain/postgrest
-anyio==4.11.0
-
-# Authentication and security (transitive)
-cryptography==46.0.3
-cffi==2.0.0
-pycparser==2.23
+PyPDF2==3.0.1
 
 # Utilities
-python-dotenv==1.0.1
 numpy==1.26.4
+python-dotenv==1.0.1
 
-# Tests
+# Test dependencies
 pytest==8.3.4
 pytest-asyncio==0.25.0
-
-# Core dependencies (required by above packages)
-annotated-types==0.7.0
-typing-extensions==4.15.0
-sniffio==1.3.1
-idna==3.11
-certifi==2025.10.5
-charset-normalizer==3.4.4
-urllib3==2.5.0
-packaging==24.2
-six==1.17.0
-rsa==4.9.1
-pyasn1==0.6.1
-
-# Additional dependencies (transitive - auto-installed by pip)
-# These are kept for explicit version pinning, but will be auto-installed anyway
-attrs==25.4.0
-jiter==0.11.1
-h11==0.14.0
-h2==4.3.0
-hpack==4.1.0
-hyperframe==6.1.0
-# Note: frozenlist, aiosignal, multidict, yarl, aiohappyeyeballs, websockets removed
-# (were transitive from aiohttp which is no longer needed)
-
-# Note: Removed unused packages:
-# - Vimeo-related: pydub, yt-dlp
-# - Unused PDF libraries: pypdf, pdfminer.six
-# - Unused LangChain: langchain-community, langchain-text-splitters, langsmith, tiktoken
-# - Unused Supabase packages: supabase, supabase-auth, supabase-functions, supafunc, gotrue, storage3, realtime
-# - Unused auth: python-jose, PyJWT, bcrypt, passlib
-# - Unused utilities: python-dateutil, PyYAML, orjson, tqdm, tenacity, regex
-# - Unused database: SQLAlchemy, greenlet
-# - Unused rate limiting: slowapi, limits
-# - Unused logging: structlog
-# - Potentially unused HTTP: requests, aiohttp (removed - not directly used, httpx used transitively)
+coverage[toml]==7.6.10

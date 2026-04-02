@@ -3,6 +3,7 @@ Embedding manager for OpenAI embeddings.
 """
 import os
 from functools import lru_cache
+from app.application.ports.embeddings_port import EmbeddingsPort
 from app.utils.runtime_helpers import get_logger_safe, get_settings_safe, memory_guard
 
 logger = get_logger_safe(__name__)
@@ -100,4 +101,39 @@ def get_embeddings_instance():
         from app.utils.logger import cleanup_memory
         cleanup_memory()
         raise
+
+
+class OpenAIEmbeddingsService(EmbeddingsPort):
+    """Embeddings port adapter backed by OpenAI embeddings."""
+
+    def embed_query(self, text: str) -> list[float]:
+        if not text or not str(text).strip():
+            raise ValueError("Query text must not be empty")
+        vec = get_embeddings_instance().embed_query(text)
+        try:
+            expected = int(getattr(_get_settings(), "EMBEDDING_DIMENSIONS", 1536))
+        except (TypeError, ValueError):
+            expected = 1536
+        if len(vec) != expected:
+            logger.warning(
+                "embed_query returned unexpected dimension (check EMBEDDING_MODEL / EMBEDDING_DIMENSIONS)",
+                component="embedding_manager",
+                operation="embed_query",
+                embedding_dim=len(vec),
+                expected_dim=expected,
+            )
+        else:
+            logger.debug(
+                "embed_query dimension OK",
+                component="embedding_manager",
+                operation="embed_query",
+                embedding_dim=len(vec),
+            )
+        return vec
+
+
+@lru_cache(maxsize=1)
+def get_embeddings_service() -> EmbeddingsPort:
+    """Return the cached embeddings port implementation."""
+    return OpenAIEmbeddingsService()
 

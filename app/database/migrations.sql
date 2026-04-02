@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS chatbot_user_queries (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 2. Chat History Table
+-- 2. Persisted conversation turns
 CREATE TABLE IF NOT EXISTS public.chatbot_chat_history (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id text,
@@ -98,7 +98,6 @@ AS $$
     pe.page_number,
     1 - (pe.embedding <=> query_embedding) AS similarity
   FROM public.pdf_embeddings pe
-  WHERE 1 - (pe.embedding <=> query_embedding) > 0.25
   ORDER BY pe.embedding <=> query_embedding ASC
   LIMIT LEAST(match_count, 200);
 $$;

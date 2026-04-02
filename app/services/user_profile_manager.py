@@ -4,6 +4,7 @@ Manages user profiles and active sessions with proper isolation.
 """
 from typing import Optional, Dict, Any
 from app.database.supabase import get_supabase
+from app.core.exceptions import NotFoundError, PersistenceError
 from app.utils.logger import logger, log_memory_usage, cleanup_memory
 from app.utils.runtime_helpers import memory_guard
 
@@ -37,17 +38,39 @@ def set_active_session(user_id: str, session_id: str) -> Optional[str]:
         
         if result.data:
             profile_id = result.data
-            logger.info(f"Active session set for user {user_id}: session {session_id} (profile_id: {profile_id})")
+            logger.info(
+                "Active session set",
+                component="user_profile",
+                operation="set_active_session",
+                result="success",
+                user_id=user_id,
+                session_id=session_id,
+                profile_id=profile_id,
+            )
             log_memory_usage("session activation")
             return profile_id
         else:
-            logger.warning(f"Failed to set active session - no data returned")
+            logger.warning(
+                "Active session set returned no data",
+                component="user_profile",
+                operation="set_active_session",
+                result="empty",
+                user_id=user_id,
+                session_id=session_id,
+            )
             return None
             
     except Exception as e:
-        logger.error(f"Failed to set active session: {e}")
+        logger.exception(
+            "Active session set failed",
+            component="user_profile",
+            operation="set_active_session",
+            result="failure",
+            user_id=user_id,
+            session_id=session_id,
+        )
         cleanup_memory()
-        return None
+        raise PersistenceError("Failed to set active session") from e
 
 
 def get_active_session(user_id: str) -> Optional[str]:
@@ -73,15 +96,34 @@ def get_active_session(user_id: str) -> Optional[str]:
         
         if result.data:
             session_id = result.data
-            logger.debug(f"Active session for user {user_id}: {session_id}")
+            logger.debug(
+                "Active session retrieved",
+                component="user_profile",
+                operation="get_active_session",
+                result="success",
+                user_id=user_id,
+                session_id=session_id,
+            )
             return session_id
         else:
-            logger.debug(f"No active session found for user {user_id}")
+            logger.debug(
+                "Active session not found",
+                component="user_profile",
+                operation="get_active_session",
+                result="empty",
+                user_id=user_id,
+            )
             return None
             
     except Exception as e:
-        logger.error(f"Failed to get active session: {e}")
-        return None
+        logger.exception(
+            "Active session lookup failed",
+            component="user_profile",
+            operation="get_active_session",
+            result="failure",
+            user_id=user_id,
+        )
+        raise PersistenceError("Failed to get active session") from e
 
 
 def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
@@ -102,13 +144,33 @@ def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
         ).eq("is_active", True).limit(1).execute()
         
         if result.data and len(result.data) > 0:
+            logger.info(
+                "User profile retrieved",
+                component="user_profile",
+                operation="get_user_profile",
+                result="success",
+                user_id=user_id,
+            )
             return result.data[0]
         else:
+            logger.info(
+                "User profile not found",
+                component="user_profile",
+                operation="get_user_profile",
+                result="empty",
+                user_id=user_id,
+            )
             return None
             
     except Exception as e:
-        logger.error(f"Failed to get user profile: {e}")
-        return None
+        logger.exception(
+            "User profile lookup failed",
+            component="user_profile",
+            operation="get_user_profile",
+            result="failure",
+            user_id=user_id,
+        )
+        raise PersistenceError("Failed to get user profile") from e
 
 
 def deactivate_session(user_id: str, session_id: str) -> bool:
@@ -130,15 +192,36 @@ def deactivate_session(user_id: str, session_id: str) -> bool:
         }).eq("user_id", user_id).eq("session_id", session_id).execute()
         
         if result.data:
-            logger.info(f"Deactivated session {session_id} for user {user_id}")
+            logger.info(
+                "Session deactivated",
+                component="user_profile",
+                operation="deactivate_session",
+                result="success",
+                user_id=user_id,
+                session_id=session_id,
+            )
             return True
         else:
-            logger.warning(f"Session {session_id} not found for user {user_id}")
+            logger.warning(
+                "Session not found for deactivation",
+                component="user_profile",
+                operation="deactivate_session",
+                result="empty",
+                user_id=user_id,
+                session_id=session_id,
+            )
             return False
             
     except Exception as e:
-        logger.error(f"Failed to deactivate session: {e}")
-        return False
+        logger.exception(
+            "Session deactivation failed",
+            component="user_profile",
+            operation="deactivate_session",
+            result="failure",
+            user_id=user_id,
+            session_id=session_id,
+        )
+        raise PersistenceError("Failed to deactivate session") from e
 
 
 def deactivate_all_sessions(user_id: str) -> int:
@@ -159,12 +242,25 @@ def deactivate_all_sessions(user_id: str) -> int:
         }).eq("user_id", user_id).eq("is_active", True).execute()
         
         deactivated_count = len(result.data) if result.data else 0
-        logger.info(f"Deactivated {deactivated_count} sessions for user {user_id}")
+        logger.info(
+            "All sessions deactivated",
+            component="user_profile",
+            operation="deactivate_all_sessions",
+            result="success",
+            user_id=user_id,
+            deactivated_count=deactivated_count,
+        )
         return deactivated_count
         
     except Exception as e:
-        logger.error(f"Failed to deactivate all sessions: {e}")
-        return 0
+        logger.exception(
+            "All sessions deactivation failed",
+            component="user_profile",
+            operation="deactivate_all_sessions",
+            result="failure",
+            user_id=user_id,
+        )
+        raise PersistenceError("Failed to deactivate all sessions") from e
 
 
 def get_user_sessions(user_id: str, include_inactive: bool = False) -> list:
@@ -191,14 +287,37 @@ def get_user_sessions(user_id: str, include_inactive: bool = False) -> list:
         result = query.execute()
         
         if result.data:
-            logger.debug(f"Retrieved {len(result.data)} sessions for user {user_id}")
+            logger.debug(
+                "User sessions retrieved",
+                component="user_profile",
+                operation="get_user_sessions",
+                result="success",
+                user_id=user_id,
+                session_count=len(result.data),
+                include_inactive=include_inactive,
+            )
             return result.data
         else:
+            logger.debug(
+                "User sessions empty",
+                component="user_profile",
+                operation="get_user_sessions",
+                result="empty",
+                user_id=user_id,
+                include_inactive=include_inactive,
+            )
             return []
             
     except Exception as e:
-        logger.error(f"Failed to get user sessions: {e}")
-        return []
+        logger.exception(
+            "User sessions lookup failed",
+            component="user_profile",
+            operation="get_user_sessions",
+            result="failure",
+            user_id=user_id,
+            include_inactive=include_inactive,
+        )
+        raise PersistenceError("Failed to get user sessions") from e
 
 
 # =========================================
@@ -239,17 +358,36 @@ def set_active_session_by_session_id(session_id: str) -> Optional[str]:
         
         if result.data:
             profile_id = result.data
-            logger.info(f"Active session set: {session_id} (profile_id: {profile_id})")
+            logger.info(
+                "Active session set by session id",
+                component="user_profile",
+                operation="set_active_session_by_id",
+                result="success",
+                session_id=session_id,
+                profile_id=profile_id,
+            )
             log_memory_usage("session activation")
             return profile_id
         else:
-            logger.warning(f"Failed to set active session - no data returned")
+            logger.warning(
+                "Active session set by session id returned no data",
+                component="user_profile",
+                operation="set_active_session_by_id",
+                result="empty",
+                session_id=session_id,
+            )
             return None
             
     except Exception as e:
-        logger.error(f"Failed to set active session: {e}")
+        logger.exception(
+            "Active session set by session id failed",
+            component="user_profile",
+            operation="set_active_session_by_id",
+            result="failure",
+            session_id=session_id,
+        )
         cleanup_memory()
-        return None
+        raise PersistenceError("Failed to set active session") from e
 
 
 def deactivate_session_by_id(session_id: str) -> bool:
@@ -271,15 +409,37 @@ def deactivate_session_by_id(session_id: str) -> bool:
         }).eq("session_id", session_id).execute()
         
         if result.data:
-            logger.info(f"Deactivated session {session_id}")
+            logger.info(
+                "Session deactivated by session id",
+                component="user_profile",
+                operation="deactivate_session_by_id",
+                result="success",
+                session_id=session_id,
+            )
             return True
-        else:
-            logger.warning(f"Session {session_id} not found")
-            return False
+        logger.warning(
+            "Session not found for deactivation by session id",
+            component="user_profile",
+            operation="deactivate_session_by_id",
+            result="empty",
+            session_id=session_id,
+        )
+        raise NotFoundError(
+            "Session not found",
+            details={"session_id": session_id},
+        )
             
     except Exception as e:
-        logger.error(f"Failed to deactivate session: {e}")
-        return False
+        logger.exception(
+            "Session deactivation by session id failed",
+            component="user_profile",
+            operation="deactivate_session_by_id",
+            result="failure",
+            session_id=session_id,
+        )
+        if isinstance(e, NotFoundError):
+            raise
+        raise PersistenceError("Failed to deactivate session") from e
 
 
 def is_session_active(session_id: str) -> bool:
@@ -300,11 +460,31 @@ def is_session_active(session_id: str) -> bool:
         ).eq("is_active", True).limit(1).execute()
         
         if result.data and len(result.data) > 0:
+            logger.debug(
+                "Session active state found",
+                component="user_profile",
+                operation="is_session_active",
+                result="success",
+                session_id=session_id,
+            )
             return result.data[0].get("is_active", False)
         else:
+            logger.debug(
+                "Session active state empty",
+                component="user_profile",
+                operation="is_session_active",
+                result="empty",
+                session_id=session_id,
+            )
             return False
             
     except Exception as e:
-        logger.error(f"Failed to check session status: {e}")
-        return False
+        logger.exception(
+            "Session active state lookup failed",
+            component="user_profile",
+            operation="is_session_active",
+            result="failure",
+            session_id=session_id,
+        )
+        raise PersistenceError("Failed to check session status") from e
 

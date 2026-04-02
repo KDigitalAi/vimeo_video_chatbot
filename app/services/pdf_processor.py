@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from functools import lru_cache
 from app.utils.logger import logger, log_memory_usage, cleanup_memory
-from app.services.text_processor import split_text_by_chars
+from app.services.text.text_processor import split_text_by_chars
 
 # Lazy imports for PDF processing libraries
 try:

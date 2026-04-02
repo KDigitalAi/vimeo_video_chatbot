@@ -9,8 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 from app.utils.logger import logger, log_memory_usage, cleanup_memory, check_memory_threshold
-from app.services.pdf_processor import process_pdf_file, validate_pdf_file, get_pdf_metadata
-from app.services.pdf_store import store_pdf_embeddings, check_duplicate_pdf, delete_pdf_embeddings
+from app.services.pdf.pdf_processor import process_pdf_file, validate_pdf_file, get_pdf_metadata
+from app.services.pdf.pdf_store import store_pdf_embeddings, check_duplicate_pdf, delete_pdf_embeddings
 
 
 class PDFIngestResult:

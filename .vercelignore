@@ -5,6 +5,9 @@
 venv/
 .venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
 # Data and uploaded assets
 uploads/

@@ -12,9 +12,9 @@ from typing import Any
 def get_logger_safe(name: str | None = None):
     """Return the shared app logger, or a basic fallback logger."""
     try:
-        from app.utils.logger import logger
+        from app.utils.logger import get_logger
 
-        return logger
+        return get_logger(name)
     except Exception:
         fallback_logger = logging.getLogger(name or __name__)
         if not fallback_logger.handlers:
